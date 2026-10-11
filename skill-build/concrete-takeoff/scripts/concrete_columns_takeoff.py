@@ -35,6 +35,27 @@ DEFAULT_DXF = ct.DEFAULT_DXF
 DEFAULT_OUT = r"D:\مشروع الحصر\output\حصر خرسانة الأعمدة"
 STAGE_HDR_RE = re.compile(r"^FROM\s+.+\b(CEILING|ROOF|FOUNDATION)", re.I)
 
+# تعريب أسماء السقوف + ربط تسمية الجدول بتسمية لوحات الأسقف (للمناسيب)
+GLOSS = [
+    ("LOWER BASEMENT CEILING", "سقف البدروم السفلي"),
+    ("UPPER BASEMENT CEILING", "سقف البدروم العلوي"),
+    ("5TH CEILING", "سقف المتكرر (5TH)"),
+    ("3RD CEILING", "سقف المتكرر (3RD)"),
+    ("1ST CEILING", "سقف الأرضي"),
+    ("TOP ROOF", "الروف العلوي"),
+    ("ROOF", "الروف"),
+    ("FOUNDATION", "الأساسات"),
+    ("GROUND CEILING", "سقف الأرضي"),
+]
+SCHED_TO_PLAN = {"1ST CEILING": "GROUND CEILING", "3RD CEILING": "TYPICAL CEILING",
+                 "5TH CEILING": "TYPICAL CEILING"}
+
+def gloss(name):
+    u = (name or "").upper()
+    for k, v in GLOSS:
+        if k in u: return v
+    return name
+
 # =================== قراءة جدول الأعمدة (المراحل الخمس) ===================
 def stage_anchors(sched):
     """مراكز X لعناوين المراحل الخمس 'FROM ... TO ... CEILING' (يسار→يمين = مرحلة 1→5)."""
@@ -154,7 +175,7 @@ def count_drops(msp, ts):
     return {p: dict(c) for p, c in dp.items()}
 
 # =================== Excel: حصر كل عمود ===================
-def build_excel(cols_rows, stage_name, height_note, grand, waste, out_path):
+def build_excel(cols_rows, stage_name, height_note, ceilings_line, grand, waste, out_path):
     NAVY, BLUE, LT, GREY, GRN = "1F3864", "2E5496", "D9E1F2", "F2F2F2", "E2EFDA"
     thin = Side(style="thin", color="BFBFBF"); bd = Border(thin, thin, thin, thin)
     wb = Workbook(); ws = wb.active; ws.title = "حصر خرسانة الأعمدة"; ws.sheet_view.rightToLeft = True
@@ -164,8 +185,10 @@ def build_excel(cols_rows, stage_name, height_note, grand, waste, out_path):
         c.border = bd
     ws.merge_cells("A1:G1"); st(ws["A1"], b=True, sz=14, color="FFFFFF", fill=NAVY)
     ws["A1"] = f"حصر خرسانة الأعمدة — {stage_name}"
-    ws.merge_cells("A2:G2"); st(ws["A2"], sz=9, color="FFFFFF", fill=BLUE)
-    ws["A2"] = f"الحجم = الطول × العرض × الارتفاع الصافي | {height_note}"
+    ws.merge_cells("A2:G2"); st(ws["A2"], b=True, sz=11, color="1F3864", fill=GRN, ha="center", wrap=True)
+    ws["A2"] = ceilings_line; ws.row_dimensions[2].height = 30
+    ws.merge_cells("A3:G3"); st(ws["A3"], sz=9, color="FFFFFF", fill=BLUE)
+    ws["A3"] = f"الحجم = الطول × العرض × الارتفاع الصافي | {height_note}"
     hdr = ["رقم العمود", "الماركة", "الطول (م)", "العرض (م)", "الارتفاع (م)", "الحجم (م³)", "ملاحظة"]
     for j, h in enumerate(hdr, 1): st(ws.cell(4, j, h), b=True, fill=NAVY, color="FFFFFF")
     r = 5
@@ -252,15 +275,30 @@ def main():
         review_cols.append((i, m, x, y)); grand += vol
 
     stage_name = f"المرحلة {args.stage}: {stage_names[si]}"
-    hnote = f"ارتفاع {args.height}م − {'drop/بلاطة' if args.mode=='net' else 'بلا خصم'} | {len(cols_rows)} عمود"
+    # اسما السقفين (من/إلى) ومناسيبهما
+    mm = re.match(r'FROM\s+(.+?)\s+TO\s+(.+)', stage_names[si], re.I)
+    from_c = mm.group(1).strip() if mm else "?"; to_c = mm.group(2).strip() if mm else "?"
+    def levels_of(cname):
+        plan = SCHED_TO_PLAN.get(cname.upper(), cname.upper())
+        for p, vals in lv.items():
+            if plan in p or p in plan: return vals
+        return []
+    fl, tl = levels_of(from_c), levels_of(to_c)
+    fs = f" (منسوب {'/'.join(f'{v:+.2f}' for v in fl)})" if fl else ""
+    tsx = f" (منسوب {'/'.join(f'{v:+.2f}' for v in tl)})" if tl else ""
+    ceilings_line = f"الحصر بين سقفين — من: {gloss(from_c)}{fs}  ◄──  إلى: {gloss(to_c)}{tsx}"
+    multi = len(fl) > 1 or len(tl) > 1
+    hnote = (f"ارتفاع {args.height}م (مؤقّت) | {len(cols_rows)} عمود"
+             + ("  ⚠ منسوب متعدّد للسقف → الارتفاع يختلف من عمود لآخر، للمراجعة" if multi else ""))
     print(f"\n=== {stage_name} ===  ({len(cols_rows)} عمود)")
+    print("  " + ceilings_line)
     for (sn, m, W, H, hC, vol, note) in cols_rows[:999]:
         print(f"  #{sn:<3d} {m:5s}  {W/1000:.2f}×{H/1000:.2f}×{hC:.2f} = {vol:.3f} م³ {note}")
     print(f"  ── الإجمالي: {grand:.2f} م³  | بعد الهالك +{args.waste:.0f}٪: {grand*(1+args.waste/100):.2f} م³")
 
     base = args.out
     xlsx = base + f" - {stage_names[si][:30]}.xlsx"
-    build_excel(cols_rows, stage_name, hnote, grand, args.waste, xlsx)
+    build_excel(cols_rows, stage_name, hnote, ceilings_line, grand, args.waste, xlsx)
     print("SAVED:", xlsx)
     review = base + " - review.dxf"
     build_review(args.dxf, review_cols, review)
