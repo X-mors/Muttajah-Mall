@@ -254,9 +254,26 @@ def main():
     si = args.stage - 1
     if not (0 <= si < len(stage_names)):
         print("رقم مرحلة غير صحيح."); return
-    if args.height is None:
-        print("مرّر --height لارتفاع هذه المرحلة (سقف↔سقف)."); return
     drop_ser = set(int(s) for s in re.findall(r'\d+', args.drop_serials))
+
+    # اسما السقفين ومناسيبهما → ارتفاع تلقائي من المناسيب (الغالب = الأعلى)
+    mm = re.match(r'FROM\s+(.+?)\s+TO\s+(.+)', stage_names[si], re.I)
+    from_c = mm.group(1).strip() if mm else "?"; to_c = mm.group(2).strip() if mm else "?"
+    def levels_of(cname):
+        plan = SCHED_TO_PLAN.get(cname.upper(), cname.upper())
+        for p, vals in lv.items():
+            if plan in p or p in plan: return vals
+        return []
+    fl, tl = levels_of(from_c), levels_of(to_c)
+    dom = lambda vals: max(vals) if vals else None       # المنسوب الغالب (الأعلى)؛ السفلية درجات محلّية
+    auto_h = round(dom(tl) - dom(fl), 2) if (fl and tl) else None
+    height = args.height if args.height is not None else auto_h
+    if height is None:
+        print("لا مناسيب كافية لهذا الدور باللوحة — مرّر --height (مناسيب المتكرّر/الروف لم تصل بعد)."); return
+    multi = len(fl) > 1 or len(tl) > 1
+    fs = f" (منسوب {'/'.join(f'{v:+.2f}' for v in fl)})" if fl else ""
+    tsx = f" (منسوب {'/'.join(f'{v:+.2f}' for v in tl)})" if tl else ""
+    ceilings_line = f"الحصر بين سقفين — من: {gloss(from_c)}{fs}  ◄──  إلى: {gloss(to_c)}{tsx}"
 
     # أعمدة هذا الدور فقط، مُرقّمة 1..N (تطابق دوائر اللوحة الإكسل)
     present = []
@@ -268,28 +285,16 @@ def main():
     cols_rows = []; review_cols = []; grand = 0.0
     for i, (m, x, y, wh) in enumerate(present, 1):
         ded = (args.drop if i in drop_ser else args.slab) if args.mode == "net" else 0.0
-        hC = max(0.0, args.height - ded)
+        hC = max(0.0, height - ded)
         vol = section_area_m2(wh) * hC
         note = "drop panel ٣٢سم" if i in drop_ser else ""
         cols_rows.append((i, m, wh[0], wh[1], hC, vol, note))
         review_cols.append((i, m, x, y)); grand += vol
 
     stage_name = f"المرحلة {args.stage}: {stage_names[si]}"
-    # اسما السقفين (من/إلى) ومناسيبهما
-    mm = re.match(r'FROM\s+(.+?)\s+TO\s+(.+)', stage_names[si], re.I)
-    from_c = mm.group(1).strip() if mm else "?"; to_c = mm.group(2).strip() if mm else "?"
-    def levels_of(cname):
-        plan = SCHED_TO_PLAN.get(cname.upper(), cname.upper())
-        for p, vals in lv.items():
-            if plan in p or p in plan: return vals
-        return []
-    fl, tl = levels_of(from_c), levels_of(to_c)
-    fs = f" (منسوب {'/'.join(f'{v:+.2f}' for v in fl)})" if fl else ""
-    tsx = f" (منسوب {'/'.join(f'{v:+.2f}' for v in tl)})" if tl else ""
-    ceilings_line = f"الحصر بين سقفين — من: {gloss(from_c)}{fs}  ◄──  إلى: {gloss(to_c)}{tsx}"
-    multi = len(fl) > 1 or len(tl) > 1
-    hnote = (f"ارتفاع {args.height}م (مؤقّت) | {len(cols_rows)} عمود"
-             + ("  ⚠ منسوب متعدّد للسقف → الارتفاع يختلف من عمود لآخر، للمراجعة" if multi else ""))
+    hsrc = "تلقائي من المناسيب" if args.height is None else "مُدخَل"
+    hnote = (f"ارتفاع الغالب {height}م ({hsrc}، سقف↔سقف − بلاطة/هابط) | {len(cols_rows)} عمود"
+             + ("  ⚠ السقف بمنسوب متعدّد (بلاطة مُدرَّجة) → أعمدة المنطقة المنخفضة أعلى ارتفاعاً، تُراجَع" if multi else ""))
     print(f"\n=== {stage_name} ===  ({len(cols_rows)} عمود)")
     print("  " + ceilings_line)
     for (sn, m, W, H, hC, vol, note) in cols_rows[:999]:

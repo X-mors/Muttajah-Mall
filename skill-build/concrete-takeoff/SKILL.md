@@ -64,13 +64,15 @@ top deduction = 0.22 m (slab)   OR   0.32 m (drop panel, where one sits over tha
 ## Usage
 
 ```
-python concrete_columns_takeoff.py --debug                       # مقاطع المراحل + استخراج آلي (مناسيب/بلاطة/هوابط)
-python concrete_columns_takeoff.py --stage 2 --height 4.60 --dwg  # حصر أعمدة المرحلة 2 (دور)، لوحة + إكسل
+python concrete_columns_takeoff.py --debug              # مقاطع المراحل + استخراج آلي (مناسيب/بلاطة/هوابط)
+python concrete_columns_takeoff.py --stage 2 --dwg      # حصر أعمدة المرحلة 2؛ الارتفاع تلقائي من المناسيب
 ```
 
-`--stage N` picks the floor (1..5 of the schedule). `--height` is the storey height (temporary single
-value until per-column S.S.L levels are wired). `--drop-serials 3,7,11` marks the columns that have a
-drop panel (deduct 0.32 instead of 0.22). `--mode gross` keeps the full ceiling-to-ceiling height.
+`--stage N` picks the floor (1..5 of the schedule). **`--height` is now OPTIONAL** — if omitted, the
+storey height is derived automatically from the detected S.S.L levels (dominant/top level of the upper
+ceiling − of the lower ceiling, e.g. +5.70 − +1.10 = 4.60 m); pass `--height` only to override, or for
+floors whose levels aren't on the sheet yet (typical/roof). `--drop-serials 3,7,11` marks the columns
+that have a drop panel (deduct 0.32 instead of 0.22). `--mode gross` keeps the full height (no deduction).
 
 ## How to work with the user
 
@@ -82,7 +84,17 @@ drop panel (deduct 0.32 instead of 0.22). `--mode gross` keeps the full ceiling-
 
 ## Status / pending
 
-Per-stage section reading, column numbering, the review drawing and the per-column Excel all work.
-**Pending:** the repeated-floor / roof S.S.L levels (the engineer is sending a sheet with them) to finish
-the storey heights, and wiring the per-column level + drop-panel association from `detect_levels()` /
-`count_drops()`. Reference drawing for this project: `drawings/2026-09-27-STR-MOTTAGAH.dxf` in the repo.
+Working: per-stage section reading, column numbering, the review drawing, the per-column Excel, the
+two-ceiling naming + levels line, and **auto storey-height from the S.S.L levels** (dominant top level).
+
+**Per-column stepped levels — NOT auto-aligned (tested, unreliable).** A floor's ceiling can carry more
+than one S.S.L (stepped slab, e.g. Upper Basement ceiling −0.10 / +1.10), so columns in the low zone are
+taller. Mapping each numbered column to its zone needs the COLUMNS & AXES plan and the ceiling plan to
+share a coordinate frame — **they do not** on these sheets (different scale/anchor, and each ceiling is
+drawn as TWO side-by-side copies). A tested translation-fit matched only ~10 % of columns, so auto
+per-column level assignment is deliberately NOT done (it would invent wrong heights). Instead: the skill
+reports the level ZONES per floor and uses the dominant height; the engineer names the low-zone columns
+(like `--drop-serials`) to raise their height. Total impact of the stepped minority is small (~2–3 %).
+
+**Pending:** the repeated-floor / roof S.S.L levels (engineer sending a sheet) for the other stages;
+optional drop-panel per-column detection. Reference drawing: `drawings/2026-09-27-STR-MOTTAGAH.dxf` in the repo.
