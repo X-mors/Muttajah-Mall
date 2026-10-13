@@ -20,16 +20,32 @@ Rebar COUNT takeoff for one plan drawing inside the STR-MOTTAGAH DXF.
   * تُستبعد السلالم: كولّ بلا L= وبقرب علامة "with stair".
   * الأطوال L= تُطابَق 1-إلى-1 بالأقرب.
 """
-import argparse, os, re, math, collections, tempfile, shutil, subprocess
+import argparse, os, re, math, collections, tempfile, shutil, subprocess, glob
 import ezdxf
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-# ------------------------- إعدادات ثابتة -------------------------
-DEFAULT_DXF = r"D:\مشروع الحصر\2026-09-22-STR-MOTTAGAH.dxf"
-DEFAULT_OUT = r"D:\مشروع الحصر\output"
-ODA_EXE     = r"C:\Program Files\ODA\ODAFileConverter 27.1.0\ODAFileConverter.exe"
+# ------------------------- إعدادات محمولة (نسبةً للمستودع) -------------------------
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # جذر المستودع (scripts/ تحته)
+
+def _default_dxf():
+    """أول لوحة .dxf في مجلد drawings/ بالمستودع؛ وإلا مسار افتراضي (مرّر --dxf عند الاختلاف)."""
+    for p in sorted(glob.glob(os.path.join(_ROOT, "drawings", "*.dxf"))):
+        return p
+    return os.path.join(_ROOT, "drawings", "STR-MOTTAGAH.dxf")
+
+def _find_oda():
+    """اكتشاف ODA File Converter بأي إصدار؛ وإلا مسار افتراضي."""
+    for pat in (r"C:\Program Files\ODA\*\ODAFileConverter.exe",
+                r"C:\Program Files (x86)\ODA\*\ODAFileConverter.exe"):
+        hits = sorted(glob.glob(pat), reverse=True)
+        if hits: return hits[0]
+    return os.environ.get("ODA_EXE", r"C:\Program Files\ODA\ODAFileConverter 27.1.0\ODAFileConverter.exe")
+
+DEFAULT_DXF = _default_dxf()
+DEFAULT_OUT = os.path.join(_ROOT, "output")
+ODA_EXE     = _find_oda()
 
 CALLOUT_RE  = re.compile(r"^T(\d{1,2})-(\d{2,4})-([TB])(?:-ADD)?$", re.I)
 LEN_RE      = re.compile(r"^L\s*=\s*(\d+)$", re.I)

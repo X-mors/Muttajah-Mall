@@ -11,14 +11,20 @@ Column COUNT takeoff from the COLUMNS & AXES plan.
     python columns_takeoff.py
     python columns_takeoff.py --dxf "<path>" --out "<xlsx>"
 """
-import argparse, os, re, math, collections
+import argparse, os, re, math, collections, glob
 import ezdxf
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
-DEFAULT_DXF = r"D:\مشروع الحصر\2026-09-22-STR-MOTTAGAH.dxf"
-DEFAULT_OUT = r"D:\مشروع الحصر\output\حصر الأعمدة - COLUMNS & AXES.xlsx"
+# مسارات محمولة نسبةً للمستودع (scripts/ تحت الجذر، واللوحة في drawings/)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+def _default_dxf():
+    for p in sorted(glob.glob(os.path.join(_ROOT, "drawings", "*.dxf"))):
+        return p
+    return os.path.join(_ROOT, "drawings", "STR-MOTTAGAH.dxf")
+DEFAULT_DXF = _default_dxf()
+DEFAULT_OUT = os.path.join(_ROOT, "output", "حصر الأعمدة - COLUMNS & AXES.xlsx")
 
 # علامة الماركة: C وحدها أو C متبوعة بأرقام (C1..C10)
 MARK_RE = re.compile(r"^C\s*\.?\s*(\d{0,3})$", re.I)

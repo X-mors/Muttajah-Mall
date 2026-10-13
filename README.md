@@ -43,11 +43,12 @@ python scripts/cutlist.py "<pieces.json>"
 # عدّ الأعمدة (العدد + المقطع لكل ماركة)
 python scripts/columns_takeoff.py --dxf "<ملف.dxf>"
 
-# حصر خرسانة أعمدة دور (مرحلة) — إكسل لكل عمود + لوحة مرقّمة
-python scripts/concrete_columns_takeoff.py --stage 2 --height 4.60 --dwg
+# حصر خرسانة أعمدة دور (مرحلة) — إكسل لكل عمود + لوحة مرقّمة؛ الارتفاع تلقائي من المناسيب
+python scripts/concrete_columns_takeoff.py --stage 2 --dwg
 ```
 
-> المسارات الافتراضية داخل `scripts/takeoff.py` / `columns_takeoff.py` مثبّتة على جهاز التطوير — عدّلها أو مرّر `--dxf`.
+> **محمول:** المسارات الافتراضية نسبيّة للمستودع — تُحمَّل اللوحة تلقائياً من `drawings/` ويُكتشَف ODA بأي
+> إصدار، فيعمل بعد الاستنساخ مباشرةً. مرّر `--dxf "<ملف>"` لأي لوحة أخرى.
 
 ## حصر خرسانة الأعمدة — القاعدة
 

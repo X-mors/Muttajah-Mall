@@ -32,7 +32,7 @@ except Exception:
     takeoff = None
 
 DEFAULT_DXF = ct.DEFAULT_DXF
-DEFAULT_OUT = r"D:\مشروع الحصر\output\حصر خرسانة الأعمدة"
+DEFAULT_OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "output", "حصر خرسانة الأعمدة")
 STAGE_HDR_RE = re.compile(r"^FROM\s+.+\b(CEILING|ROOF|FOUNDATION)", re.I)
 
 # تعريب أسماء السقوف + ربط تسمية الجدول بتسمية لوحات الأسقف (للمناسيب)
