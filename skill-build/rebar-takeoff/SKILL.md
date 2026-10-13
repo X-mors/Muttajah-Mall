@@ -21,6 +21,10 @@ plus a review drawing. It was built against real consultant drawings and encodes
 **Prefer running the bundled scripts over re-deriving the geometry by hand** — the logic is subtle and
 already validated.
 
+> ⚠️ **نطاق العمل:** هذه المهارة مُعايَرة على **أعراف لوحات هذا المكتب (مشروع Muttajah Mall)** — طبقات
+> `ST-RFT-*`/`ST-203-SLAB-TXT`، صيغة الكولّات `T##-###-T|B`، الفتحات على `S - dot`، وملاحظات الشبكة كـ
+> block attributes. **قد لا تعمل كما هي على مشروع إنشائي آخر بأعراف مختلفة** دون ضبط الطبقات/الصِّيَغ.
+
 ## Two modes — pick by what the user is counting
 
 1. **Additional reinforcement** (extra local bars over supports): callouts like `T16-200-T` / `T12-400-B`.

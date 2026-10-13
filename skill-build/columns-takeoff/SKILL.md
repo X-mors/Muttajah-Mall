@@ -22,6 +22,10 @@ that drawing's conventions. **Prefer running `scripts/columns_takeoff.py` over c
 labels are easy to miscount by eye (many are white-on-white, see the gotchas) and the script also joins
 the counts to the schedule automatically.
 
+> ⚠️ **نطاق العمل:** هذه المهارة مُعايَرة على **أعراف لوحات هذا المكتب (مشروع Muttajah Mall)** — أسماء
+> الطبقات، صيغة الماركات `C/C1..Cn`، وتخطيط جدول الأعمدة. **قد لا تعمل كما هي على مشروع إنشائي آخر بأعراف
+> مختلفة** دون ضبط الطبقات/الصِّيَغ.
+
 ## The core idea
 
 On a "COLUMNS & AXES" sheet every column carries a **mark** — a short text like `C`, `C1`, `C2` … — and

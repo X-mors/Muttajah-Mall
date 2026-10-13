@@ -23,6 +23,10 @@ COLUMNS & AXES plan and the COLUMN SCHEDULE, and adds per-stage sections + store
 **Prefer running `scripts/concrete_columns_takeoff.py` over re-deriving the geometry** — the schedule
 reading is subtle and already encoded.
 
+> ⚠️ **نطاق العمل:** هذه المهارة مُعايَرة على **أعراف لوحات هذا المكتب (مشروع Muttajah Mall)** — جدول
+> الأعمدة بمراحله الخمس، ترميز المناسيب (S.S.L في بلوك)، سُمك البلاطة (`SLAB=###mm`) والهوابط (`320` على
+> `S-TEXT`). **قد لا تعمل كما هي على مشروع إنشائي آخر بأعراف مختلفة** دون ضبط.
+
 ## The method
 
 For a floor (= one of the schedule's 5 stages), each column's concrete:
