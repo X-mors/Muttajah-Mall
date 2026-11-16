@@ -105,68 +105,106 @@ def assign_thickness(footings, bubbles):
         f["top"] = top_level(f["th"])
     return [f for f in footings if f["th"] is not None]
 
-def collect_beams(msp):
-    """نصوص السملات S(العرض x العمق) ومواقعها + الارتفاع الظاهر فوق اللبشة المنخفضة + منسوب الظهر.
+BEAM_W_MM = 300           # عرض السمل (من S(300x…)) — لرسم الشريحة
 
-    قاع السملة = قاع التأسيس (FORMATION_LEVEL)؛ ظهرها = القاع + العمق.
-    الارتفاع الظاهر فوق سطح اللبشة المنخفضة (0.40م) = العمق − 400مم.
+def _mline_pts(e):
+    pts = []
+    try:
+        for v in e.vertices:
+            loc = v.location if hasattr(v, "location") else v
+            pts.append((float(loc[0]), float(loc[1])))
+    except Exception:
+        pass
+    return pts
+
+def _strip(a, b, width):
+    """مستطيل شريحة بعرض width حول الخط a→b."""
+    dx, dy = b[0]-a[0], b[1]-a[1]
+    L = math.hypot(dx, dy) or 1.0
+    px, py = -dy/L*width/2.0, dx/L*width/2.0
+    return [(a[0]+px, a[1]+py), (b[0]+px, b[1]+py), (b[0]-px, b[1]-py), (a[0]-px, a[1]-py)]
+
+def collect_beams(msp):
+    """السملات = كيانات MLINE (خط مزدوج عرض 300مم) على طبقة R.C. footing، مع مطابقة ليبل S(العرض×العمق)
+    لأقرب نص. تُعاد المُعلَّمة فقط (الليبل مرّة واحدة على لوحة CONCRETE DIMENSIONS؛ النسخة على RFT بلا ليبل).
+
+    قاع السملة = قاع التأسيس؛ ظهرها = القاع + العمق؛ الظاهر فوق اللبشة المنخفضة = العمق − 400مم.
     """
-    beams = []
     rx = re.compile(r"S\s*\(\s*(\d+)\s*[xX]\s*(\d+)\s*\)")
+    labels = []
     for e in msp.query("TEXT MTEXT"):
-        if e.dxf.layer != BUBBLE_LAYER:
-            continue
         m = rx.search(text_of(e))
         if m:
-            w, d = int(m.group(1)), int(m.group(2))
-            p = tpos(e) or (0.0, 0.0)
-            beams.append({"w": w, "d": d, "x": p[0], "y": p[1],
-                          "exposed_mm": max(d - LOW_RAFT_THK_MM, 0),
-                          "back": round(FORMATION_LEVEL + d / 1000.0, 2)})
+            p = tpos(e)
+            if p: labels.append((int(m.group(1)), int(m.group(2)), p[0], p[1]))
+    beams = []
+    for e in msp.query("MLINE"):
+        if e.dxf.layer != FOOTING_LAYER:
+            continue
+        pts = _mline_pts(e)
+        if len(pts) < 2:
+            continue
+        a, b = pts[0], pts[-1]
+        mx, my = (a[0]+b[0])/2.0, (a[1]+b[1])/2.0
+        best, bd = None, 1e18
+        for (w, d, lx, ly) in labels:
+            dd = math.hypot(lx-mx, ly-my)
+            if dd < bd: bd, best = dd, (w, d)
+        if best is None or bd > 2500:       # نسخة غير مُعلَّمة (لوحة RFT) — تُتجاهَل لتفادي التكرار
+            continue
+        w, d = best
+        beams.append({"a": a, "b": b, "mx": mx, "my": my, "w": w, "d": d,
+                      "len": math.hypot(b[0]-a[0], b[1]-a[1]),
+                      "exposed_mm": max(d - LOW_RAFT_THK_MM, 0),
+                      "back": round(FORMATION_LEVEL + d / 1000.0, 2)})
     return beams
 
 def render_beams(footings, beams, out_png):
-    """صورة: القواعد كسياق + كل سمل مُعلّم بالارتفاع الظاهر منه."""
+    """صورة: القواعد بسماكاتها + السملات مرسومة كشرائح فعلية مع الارتفاع الظاهر."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.patches import Polygon as MplPoly
-    fig, ax = plt.subplots(figsize=(12, 10), dpi=170)
+    fig, ax = plt.subplots(figsize=(12, 10), dpi=175)
     COL = {700:"#e7f5ff",1000:"#d0ebff",1100:"#fff4e6",1300:"#f3f0ff",1500:"#ffe3e3"}
-    for f in footings:                      # القواعد بسماكاتها/مناسيبها كسياق
+    for f in footings:
         ax.add_patch(MplPoly(f["pts"], closed=True, fill=True,
-                     facecolor=COL.get(f.get("th"), "#f1f3f5"), alpha=0.6,
-                     edgecolor="#adb5bd", linewidth=0.9, zorder=1))
+                     facecolor=COL.get(f.get("th"), "#f1f3f5"), alpha=0.55,
+                     edgecolor="#ced4da", linewidth=0.8, zorder=1))
         if f.get("th"):
             ax.text(f["c"][0], f["c"][1], f"t={f['th']}\n{f.get('top')}",
-                    ha="center", va="center", fontsize=6, color="#868e96", zorder=2)
-    xs = [b["x"] for b in beams]; ys = [b["y"] for b in beams]
-    for b in beams:
-        ax.plot(b["x"], b["y"], "s", ms=5, color="#1864ab", zorder=4)
-        ax.annotate(f"S{b['w']}x{b['d']}\n^ {b['exposed_mm']/1000:.2f} m",
-                    (b["x"], b["y"]), fontsize=6.6, ha="center", va="center",
-                    color="#c00000", fontweight="bold", zorder=6,
-                    bbox=dict(boxstyle="round,pad=0.18", fc="white", ec="#c00000", lw=0.6, alpha=0.9))
-    allx = xs + [p[0] for f in footings for p in f["pts"]]
-    ally = ys + [p[1] for f in footings for p in f["pts"]]
+                    ha="center", va="center", fontsize=6, color="#adb5bd", zorder=2)
+    pxs, pys = [], []
+    for b in beams:                          # رسم السمل كشريحة 300مم على خط الوسط الفعلي
+        strip = _strip(b["a"], b["b"], BEAM_W_MM)
+        pxs += [p[0] for p in strip]; pys += [p[1] for p in strip]
+        ax.add_patch(MplPoly(strip, closed=True, fill=True, facecolor="#1864ab",
+                     edgecolor="#0b3d66", linewidth=0.5, alpha=0.9, zorder=4))
+        ax.annotate(f"S{b['w']}x{b['d']}\n^{b['exposed_mm']/1000:.2f}m", (b["mx"], b["my"]),
+                    fontsize=6, ha="center", va="center", color="#c00000", fontweight="bold",
+                    zorder=6, bbox=dict(boxstyle="round,pad=0.14", fc="white", ec="#c00000", lw=0.5, alpha=0.92))
+    allx = pxs + [p[0] for f in footings for p in f["pts"]]
+    ally = pys + [p[1] for f in footings for p in f["pts"]]
     mx = (max(allx)-min(allx))*0.06; my = (max(ally)-min(ally))*0.05
     ax.set_xlim(min(allx)-mx, max(allx)+mx); ax.set_ylim(min(ally)-my, max(ally)+my)
     ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
     for s in ax.spines.values(): s.set_visible(False)
-    ax.set_title("RAFT tie-beams (السملات) — exposed height above low raft\n"
+    ax.set_title("RAFT tie-beams (السملات) drawn as real 300mm strips — exposed height\n"
                  "'^ X.XX m' = depth - 0.40m  (exposed above low raft top -8.45)", fontsize=10)
     fig.tight_layout(); os.makedirs(os.path.dirname(out_png), exist_ok=True)
     fig.savefig(out_png, bbox_inches="tight")
     return out_png
 
 def build_beams_review(src_dxf, beams, out_dxf, want_dwg=False):
-    """لوحة DXF: جنب كل سمل الارتفاع الظاهر منه ومنسوب ظهره (عربي)."""
+    """لوحة DXF: السمل كشريحة مغلقة + الارتفاع الظاهر ومنسوب الظهر جنبه (عربي)."""
     doc = ezdxf.readfile(src_dxf); msp = doc.modelspace()
     LAY = "CHECK-RAFT-BEAMS"
     if LAY not in doc.layers: doc.layers.add(LAY, color=1)
     for b in beams:
-        txt = f"ظاهر {b['exposed_mm']/1000:.2f}م (ظهر {b['back']})"
-        t = msp.add_text(txt, height=350, dxfattribs={"layer": LAY, "color": 1})
-        t.dxf.insert = (b["x"] + 400, b["y"] + 400)
+        strip = _strip(b["a"], b["b"], BEAM_W_MM)
+        msp.add_lwpolyline(strip, close=True, dxfattribs={"layer": LAY, "color": 1})
+        txt = f"S{b['w']}x{b['d']} ظاهر {b['exposed_mm']/1000:.2f}م (ظهر {b['back']})"
+        t = msp.add_text(txt, height=300, dxfattribs={"layer": LAY, "color": 1})
+        t.dxf.insert = (b["mx"] + 250, b["my"] + 250)
     os.makedirs(os.path.dirname(out_dxf), exist_ok=True)
     doc.saveas(out_dxf)
     dwg = None
@@ -268,9 +306,9 @@ def main():
         print(f"\nعدد السملات = {len(beams)} | الظاهر = العمق − {LOW_RAFT_THK_MM}مم (فوق اللبشة المنخفضة -8.45)")
         hb = collections.Counter(b["d"] for b in beams)
         print("الأعماق:", {k: hb[k] for k in sorted(hb)})
-        print(f"  {'السمل':>12} {'ظاهر(م)':>9} {'منسوب الظهر':>12}  الموقع")
-        for b in sorted(beams, key=lambda b: (-b["d"], b["x"])):
-            print(f"  {'S%dx%d'%(b['w'],b['d']):>12} {b['exposed_mm']/1000:>9.2f} {b['back']:>12}  ({b['x']:.0f},{b['y']:.0f})")
+        print(f"  {'السمل':>12} {'ظاهر(م)':>9} {'منسوب الظهر':>12} {'الطول(مم)':>10}  الموقع")
+        for b in sorted(beams, key=lambda b: (-b["d"], b["mx"])):
+            print(f"  {'S%dx%d'%(b['w'],b['d']):>12} {b['exposed_mm']/1000:>9.2f} {b['back']:>12} {b['len']:>10.0f}  ({b['mx']:.0f},{b['my']:.0f})")
         print("PNG:", render_beams(footings, beams, os.path.join(OUTDIR, "raft-beams-exposed.png")))
         dxf, dwg = build_beams_review(args.dxf, beams,
                                       os.path.join(OUTDIR, "raft-beams-exposed.dxf"), args.dwg)
