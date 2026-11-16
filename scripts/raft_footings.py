@@ -131,9 +131,14 @@ def render_beams(footings, beams, out_png):
     import matplotlib.pyplot as plt
     from matplotlib.patches import Polygon as MplPoly
     fig, ax = plt.subplots(figsize=(12, 10), dpi=170)
-    for f in footings:                      # القواعد كسياق خفيف
-        ax.add_patch(MplPoly(f["pts"], closed=True, fill=False,
+    COL = {700:"#e7f5ff",1000:"#d0ebff",1100:"#fff4e6",1300:"#f3f0ff",1500:"#ffe3e3"}
+    for f in footings:                      # القواعد بسماكاتها/مناسيبها كسياق
+        ax.add_patch(MplPoly(f["pts"], closed=True, fill=True,
+                     facecolor=COL.get(f.get("th"), "#f1f3f5"), alpha=0.6,
                      edgecolor="#adb5bd", linewidth=0.9, zorder=1))
+        if f.get("th"):
+            ax.text(f["c"][0], f["c"][1], f"t={f['th']}\n{f.get('top')}",
+                    ha="center", va="center", fontsize=6, color="#868e96", zorder=2)
     xs = [b["x"] for b in beams]; ys = [b["y"] for b in beams]
     for b in beams:
         ax.plot(b["x"], b["y"], "s", ms=5, color="#1864ab", zorder=4)
