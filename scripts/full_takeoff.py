@@ -10,7 +10,7 @@ import ezdxf
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
-import takeoff, slab_mesh
+import takeoff, slab_mesh, beams_rebar as br
 
 def detect_openings_full(msp, box):
     """يفوّض لكاشف الفتحات في slab_mesh (تقاطع قُطرَي كل X → فصل الفتحات المتلاصقة)؛ يعيد قائمة (م²,cx,cy,w,h)."""
@@ -86,9 +86,19 @@ def main():
     mesh_lenw = {d: mesh_len[d] * mesh_f[d] for d in mesh_len}
     mesh_bars = {d: math.ceil(mesh_lenw[d] / 12.0) for d in mesh_len}   # تصميمي (مستقل)
 
+    # ---------- BEAMS (كمرات السقف: مقطع من الليبل، طول من S -Beams، تسليح من الجدول) ----------
+    beams, blabels, bunclaimed = br.extract_beams(msp, tbox)
+    bpiv, bdetails, bpermark = br.beam_rebar(beams)
+    beam_len = {d: sum(L*n for L,n in bpiv[d].items())/1000.0 for d in bpiv}
+    beam_tot_len = sum((bm["length"] or 0) for bm in beams)/1000.0
+    try:
+        import cutlist as _cl; _bcut=_cl.optimize(bpiv)
+    except Exception: _bcut=None
+    beam_stock={d:(_bcut[d]["stock_bars"] if _bcut else math.ceil(beam_len[d]/12.0)) for d in beam_len}
+
     # ---------- grand total meters per diameter ----------
-    dias = sorted(set(list(add_len) + list(mesh_len)))
-    grand_m = {d: round(add_len.get(d, 0) + mesh_lenw.get(d, 0)) for d in dias}  # تصميمي (لا يتغيّر)
+    dias = sorted(set(list(add_len) + list(mesh_len) + list(beam_len)))
+    grand_m = {d: round(add_len.get(d, 0) + mesh_lenw.get(d, 0) + beam_len.get(d, 0)) for d in dias}  # تصميمي
     # فائض الإضافي (قطع كاملة) يُستعمل في الشبكة لنفس القطر: كل قطعة توفّر (طولها − وصلة) من صلب الشبكة
     mesh_reuse_bars = {}; mesh_buy = {}
     for d in mesh_len:
@@ -98,7 +108,7 @@ def main():
         mesh_buy[d] = math.ceil((mesh_lenw[d] - reuse_m) / 12.0)
         mesh_reuse_bars[d] = mesh_bars[d] - mesh_buy[d]
     # وزن الشراء = أسياخ الإضافي الفعلية + أسياخ الشبكة بعد خصم الفائض المُستعمَل
-    buy_bars = {d: add_stock.get(d, 0) + mesh_buy.get(d, 0) for d in dias}
+    buy_bars = {d: add_stock.get(d, 0) + mesh_buy.get(d, 0) + beam_stock.get(d, 0) for d in dias}
     buy_w = {d: round(buy_bars[d] * 12.0 * d * d / 162.0) for d in dias}
 
     print(f"السقف: {ttl}")
@@ -106,7 +116,9 @@ def main():
     print(f"الشبكة: صافي {net:.0f}م² | مواصفات:", [f"{n['face']} T{n['dia']}@{n['sp']}" for n in notes])
     print(f"الشبكة (م/قطر، وصلات {args.lap}×قطر{' تراكب-فقط' if args.reuse else ''}):",
           {f"Ø{d}": f"{round(mesh_lenw[d])} (×{mesh_f[d]:.3f})" for d in mesh_lenw})
-    print("الإجمالي الكلي (م/قطر):", {f"Ø{d}": grand_m[d] for d in dias})
+    print(f"الكمرات: {len(beams)} جزء (span) | طول {beam_tot_len:.1f}م | ليبلات غير مُلتقَطة {len(bunclaimed)} | (م/قطر):",
+          {f"Ø{d}": round(beam_len[d]) for d in beam_len})
+    print("الإجمالي الكلي (م/قطر، شامل الكمرات):", {f"Ø{d}": grand_m[d] for d in dias})
 
     # ---------- EXCEL ----------
     NAVY,BLUE,LT,GREY,GRN = "1F3864","2E5496","D9E1F2","F2F2F2","E2EFDA"
@@ -148,8 +160,27 @@ def main():
         st(ws.cell(r,1,f"Ø{d}"),b=True,fill=LT); st(ws.cell(r,2,round(mesh_len[d]))); st(ws.cell(r,3,round(mesh_lenw[d])))
         st(ws.cell(r,4,mesh_bars[d]),b=True); st(ws.cell(r,5," ، ".join(sorted(set(spec_by_d[d]))))); r+=1
     r+=1
+    # (B2) beams
+    ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,"◄ ثالثاً: حديد الكمرات — تسليح الجدول × أطوال اللوحة (per-span)"),b=True,color="FFFFFF",fill=BLUE,ha="right"); r+=1
+    ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,f"عدد الأجزاء (spans) {len(beams)} | إجمالي طول الكمرات {beam_tot_len:.1f} م | ليبلات غير مُلتقَطة الطول {len(bunclaimed)} (راجعها على اللوحة) | افتراضات تفصيل: إرساء {br.ANCHOR_MM}مم، سيخ شدّ علوي {br.SUPPORT_FRAC:g}×الطول، كانات 5/م Ø8"),sz=9,fill=GRN,ha="right",wrap=True); ws.row_dimensions[r].height=30; r+=1
+    for h,c in [("الماركة",1),("عدد الأجزاء",2),("إجمالي الطول (م)",3),("القطاعات (WxD)",4),("التسليح (علوي L/C/R · سفلي · كانات)",5)]:
+        st(ws.cell(r,c,h),b=True,fill=NAVY,color="FFFFFF")
+    r+=1
+    bsec=collections.defaultdict(set)
+    for bm in beams: bsec[bm["mk"]].add(f"{bm['W']}×{bm['D']}")
+    for mk in sorted(bpermark):
+        rf=br.BEAM_RFT.get(mk)
+        rtxt = (f"{rf[0][0]}T{rf[0][1]}/{rf[1][0]}T{rf[1][1]}/{rf[2][0]}T{rf[2][1]} · {rf[3][0]}T{rf[3][1]} · 5Ø{rf[4][0]}" if rf else "—")
+        st(ws.cell(r,1,mk),b=True,fill=LT); st(ws.cell(r,2,bpermark[mk]["n"]))
+        st(ws.cell(r,3,round(bpermark[mk]["L"]/1000.0,1))); st(ws.cell(r,4," ، ".join(sorted(bsec[mk]))))
+        st(ws.cell(r,5,rtxt)); r+=1
+    st(ws.cell(r,1,"حديد الكمرات (م/قطر)"),b=True,fill=GREY)
+    bdias=sorted(beam_len)
+    st(ws.cell(r,2," ، ".join(f"Ø{d}={round(beam_len[d])}م" for d in bdias)),ha="right"); ws.merge_cells(f"B{r}:E{r}"); r+=1
+    bw=round(sum(beam_len[d]*d*d/162.0 for d in bdias))
+    st(ws.cell(r,1,"وزن حديد الكمرات (كجم)"),b=True,fill=LT); st(ws.cell(r,2,f"{bw}  ({round(bw/1000.0,2)} طن)"),b=True,fill=LT); ws.merge_cells(f"B{r}:E{r}"); r+=2
     # (C) grand total meters
-    ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,"◄ الإجمالي الكلي لكل قطر (متر طولي = إضافي + شبكة)"),b=True,color="FFFFFF",fill=NAVY,ha="right"); r+=1
+    ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,"◄ الإجمالي الكلي لكل قطر (متر طولي = إضافي + شبكة + كمرات)"),b=True,color="FFFFFF",fill=NAVY,ha="right"); r+=1
     st(ws.cell(r,1,"القطر"),b=True,fill=BLUE,color="FFFFFF")
     for j,d in enumerate(dias): st(ws.cell(r,2+j,f"Ø{d}"),b=True,fill=BLUE,color="FFFFFF")
     r+=1
@@ -203,6 +234,28 @@ def main():
     st(ws3.cell(len(ops)+2,1,"الإجمالي"),b=True,fill=LT); st(ws3.cell(len(ops)+2,2,round(sum(o[0] for o in ops),1)),b=True,fill=LT)
     for j,wd in enumerate([6,12,10,10,10,10],1): ws3.column_dimensions[get_column_letter(j)].width=wd
 
+    # beams detail sheet (per span)
+    ws4=wb.create_sheet("الكمرات"); ws4.sheet_view.rightToLeft=True
+    for j,h in enumerate(["الرقم","الماركة","المقطع WxD","الطول (م)","مقلوبة","علوي L","علوي C","علوي R","سفلي","كانات","x","y"],1):
+        st(ws4.cell(1,j,h),b=True,fill=NAVY,color="FFFFFF")
+    bi=0
+    for bm,det in sorted(bdetails,key=lambda z:(-(z[0]['cy'] or 0),(z[0]['cx'] or 0))):
+        bi+=1; bm["serial"]=bi
+        if det:
+            rowv=[bi,bm["mk"],f"{bm['W']}×{bm['D']}",round((bm['length'] or 0)/1000.0,2),("نعم" if bm["inv"] else ""),
+                  f"{det['topl'][0]}T{det['topl'][1]}" if det['topl'][0] else "—",
+                  f"{det['topc'][0]}T{det['topc'][1]}",
+                  f"{det['topr'][0]}T{det['topr'][1]}" if det['topr'][0] else "—",
+                  f"{det['bottom'][0]}T{det['bottom'][1]}", f"{det['stirrups'][0]}Ø{det['stirrups'][1]}",
+                  round(bm["cx"]),round(bm["cy"])]
+            fill=None
+        else:
+            rowv=[bi,bm["mk"],f"{bm['W']}×{bm['D']}","— (طول غير مُلتقَط)",("نعم" if bm["inv"] else ""),"","","","","",round(bm["cx"]),round(bm["cy"])]
+            fill="FFF2CC"
+        for j,v in enumerate(rowv,1): st(ws4.cell(bi+1,j,v),fill=fill)
+    for j,wd in enumerate([6,8,10,9,7,8,8,8,8,9,10,10],1): ws4.column_dimensions[get_column_letter(j)].width=wd
+    ws4.freeze_panes="A2"
+
     os.makedirs(args.outdir,exist_ok=True)
     base=os.path.join(args.outdir, takeoff.safe(ttl)+" - FULL")
     xlsx=base+".xlsx"; wb.save(xlsx)
@@ -215,8 +268,10 @@ def main():
     unknown=[{"diameter":d,"count":add_piv[d].get(0,0)} for d in sorted(add_piv) if add_piv[d].get(0)]
     mesh_json=[{"diameter":d,"full_bars_12m":mesh_bars[d],
                 "spec":" ، ".join(sorted(set(spec_by_dia[d])))} for d in sorted(mesh_bars)]
+    beam_pieces=[{"diameter":d,"length_mm":L,"count":bpiv[d][L]}
+                 for d in sorted(bpiv) for L in sorted(bpiv[d]) if L and bpiv[d][L]]
     sidecar={"ceiling":ttl,"stock_length_mm":12000,"unit":"mm",
-             "pieces":piece_list,"unknown_length":unknown,"mesh":mesh_json}
+             "pieces":piece_list,"unknown_length":unknown,"mesh":mesh_json,"beams":beam_pieces}
     pj=base+" - pieces.json"
     with open(pj,"w",encoding="utf-8") as f: json.dump(sidecar,f,ensure_ascii=False,indent=1)
     print("SAVED:",pj)
@@ -242,6 +297,22 @@ def main():
     for i,(a2,cx,cy,w,h) in enumerate(ops,1):
         msp2.add_lwpolyline([(cx-w/2,cy-h/2),(cx+w/2,cy-h/2),(cx+w/2,cy+h/2),(cx-w/2,cy+h/2),(cx-w/2,cy-h/2)],dxfattribs={"layer":LAY,"color":ORANGE})
         t=msp2.add_text(f"OP{i}",height=350,dxfattribs={"layer":LAY,"color":ORANGE}); t.dxf.insert=(cx,cy)
+    # beams: draw each span centerline + serial + mark (engineer verifies length by eye)
+    BLAY="CHECK-BEAMS"
+    if BLAY not in doc2.layers: doc2.layers.add(BLAY,color=30)
+    for bm in beams:
+        if bm.get("orient")=="H":
+            p0,p1=(bm["lo"],bm["pos"]),(bm["hi"],bm["pos"])
+        elif bm.get("orient")=="V":
+            p0,p1=(bm["pos"],bm["lo"]),(bm["pos"],bm["hi"])
+        else:
+            p0=p1=None
+        col = 1 if not bm.get("matched") else 30   # أحمر = طول غير مُلتقَط
+        if p0:
+            msp2.add_line(p0,p1,dxfattribs={"layer":BLAY,"color":col})
+        sr=bm.get("serial")
+        tt=msp2.add_text(f"{sr}:{bm['mk']}",height=300,dxfattribs={"layer":BLAY,"color":col})
+        tt.dxf.insert=(bm["cx"],bm["cy"]-450)
     review=base+" - review.dxf"; doc2.saveas(review)
     print("SAVED:",xlsx); print("SAVED:",review)
     if args.dwg:

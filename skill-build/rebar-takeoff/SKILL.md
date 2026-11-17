@@ -34,10 +34,19 @@ already validated.
    `TOP=T10@200 C/C` / `BOT.=T10@200 C/C`. Use `scripts/slab_mesh.py`. Method + conventions:
    `references/slab-mesh.md`. This is an AREA-based supply calc, not per-bar counting — read that file.
 
-   **Beam reinforcement** (كمرات السقف B1–B5 / CA1–CA4): when the user asks for a full **ceiling rebar**
-   takeoff, the beams' bars are part of it. The beam reinforcement table (Top L/C/R, Bottom, stirrups
-   5Ø8/m) is stored in `references/beam-reinforcement.md`; take each beam's mark from its plan label,
-   its reinforcement from that table, and its length/section from the beam label `MARK(WxD)` on the plan.
+   **Beam reinforcement** (كمرات السقف B1–B5 / CA1–CA4) — **now built into `full_takeoff.py`** via
+   `scripts/beams_rebar.py`, so a ceiling rebar takeoff already includes the beams. It:
+   - reads each beam's **section** from its plan label `MARK(WxD)` (layers `BEAMS`/`ST-203-SLAB-TXT`;
+     `S -Beams` S(WxD) = foundation ties, excluded), its **length** from the beam's drawn edge-pair on
+     layer `S -Beams` (gap = width, pair length = span), and its **reinforcement** from `BEAM_RFT` in
+     `beams_rebar.py` (the table in `references/beam-reinforcement.md`: Top L/C/R, Bottom, 5Ø8/m stirrups);
+   - computes per span: bottom + top-continuous full-length bars (+ anchorage), top support extras, and
+     stirrups (count = 5/m, length = net perimeter + 2 hooks) → bars by Ø×length, folded into the Excel
+     summary + grand total + `pieces.json`, with a per-span **"الكمرات"** sheet and beam lines on the
+     review drawing (serial:mark). **Detailing assumptions** (anchorage `ANCHOR_MM`, support-bar
+     `SUPPORT_FRAC`, cover/hooks) are explicit constants at the top of `beams_rebar.py` — tune per office.
+   - Coverage: beam length comes from drawn edge-pairs; a few polyline-drawn beams or repeated per-span
+     labels are reported as "ليبلات غير مُلتقَطة" — verify them on the review drawing.
    (Beam concrete volume is the separate **ceiling-concrete-takeoff** skill.)
 
 3. **Complete ceiling takeoff** (both of the above in one deliverable): `scripts/full_takeoff.py
