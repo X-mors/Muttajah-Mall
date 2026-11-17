@@ -46,6 +46,53 @@ def _text(e):
     except Exception: pass
     return ""
 
+# ═══ الرامبات (مشترك بين حصر الحديد والخرسانة) ═══
+RAMP_LBL = re.compile(r"^RAMP\s*0?\d$", re.I)
+RAMP_MESH_RE = re.compile(r"T(\d+)\s*-\s*(\d+)\s*-\s*(T|B)\b", re.I)   # كولّ شبكة الرامب: T12-200-B
+
+def measure_ramps(msp, rbox):
+    """يجد ليبلات 'RAMP 0N' داخل لوحة الرامبات ويقيس bbox شريط كل رامب →
+    [(اسم, عرض_م, طول_م, مساحة_م²)]. (الرامب شريط ضيّق، فالقياس = امتداد جيومتريه الفعلي.)"""
+    xmin,xmax,ymin,ymax=rbox; labs=[]
+    for e in msp.query("TEXT MTEXT"):
+        t=" ".join(_text(e).split())
+        if RAMP_LBL.match(t) and xmin<=e.dxf.insert.x<=xmax and ymin<=e.dxf.insert.y<=ymax:
+            labs.append((t.upper().replace(" ",""), e.dxf.insert.x, e.dxf.insert.y))
+    out=[]
+    for nm,lx,ly in labs:
+        xs=[];ys=[]
+        for e in msp.query("LINE LWPOLYLINE"):
+            if e.dxf.layer not in ("S -Beams","SLAB","ST-RFT-TOP","ST-RFT-BOT","S-OPENING"): continue
+            pp=[(e.dxf.start.x,e.dxf.start.y),(e.dxf.end.x,e.dxf.end.y)] if e.dxftype()=="LINE" else list(e.get_points("xy"))
+            for x,y in pp:
+                if abs(x-lx)<6000 and abs(y-ly)<22000: xs.append(x);ys.append(y)
+        if xs:
+            w=max(xs)-min(xs); h=max(ys)-min(ys)
+            out.append((nm, w/1000.0, h/1000.0, w*h/1e6))
+    return out
+
+def ramp_mesh_specs(msp, rbox):
+    """كولّات شبكة بلاطة الرامب 'T##-###-T|B' (مسافة) → [(dia, spacing_mm, face)] مميّزة."""
+    xmin,xmax,ymin,ymax=rbox; seen=set(); out=[]
+    for e in msp.query("TEXT MTEXT"):
+        x,y=e.dxf.insert.x,e.dxf.insert.y
+        if not (xmin<=x<=xmax and ymin<=y<=ymax): continue
+        m=RAMP_MESH_RE.search(" ".join(_text(e).split()))
+        if m:
+            key=(int(m.group(1)),int(m.group(2)),m.group(3).upper())
+            if key not in seen: seen.add(key); out.append(key)
+    return out
+
+def ramp_slab_mesh_len(msp, rbox, slope=1.0):
+    """طول شبكة بلاطة الرامب لكل قطر (م) = مساحة الرامب × ميل × (1000/المسافة) لكل كولّ اتجاه.
+    يعيد (dict dia->متر، مساحة م², قائمة الشرائط، قائمة المواصفات)."""
+    strips=measure_ramps(msp, rbox); area=sum(s[3] for s in strips)
+    specs=ramp_mesh_specs(msp, rbox)
+    out=collections.defaultdict(float)
+    for dia,sp,face in specs:
+        out[dia]+= area*slope*(1000.0/sp)
+    return dict(out), area, strips, specs
+
 def extract_labels(msp, box):
     xmin,xmax,ymin,ymax = box
     out=[]

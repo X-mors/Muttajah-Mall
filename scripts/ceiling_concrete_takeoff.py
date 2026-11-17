@@ -22,7 +22,6 @@ from openpyxl.utils import get_column_letter
 import takeoff, slab_mesh, beams_rebar as br
 
 WASTE = 1.05           # هدر خرسانة ≈ 5٪
-RAMP_TITLE = "RAMPS REINFORCEMENT PLAN FOR LOWER BASEMENT"
 
 def beam_volume(beams, t_slab_mm, slope=1.0):
     """حجم الكمرات = Σ W×(D−t)×L (الظاهر أسفل البلاطة). المقلوبة نفس الصيغة. العمق المتغيّر = متوسط."""
@@ -35,29 +34,6 @@ def beam_volume(beams, t_slab_mm, slope=1.0):
         v=(bm["W"]/1000.0)*(stem/1000.0)*(L/1000.0)*slope
         tot+=v; rows.append((bm,D,stem,L*slope,v))
     return tot, rows, nomatch
-
-RAMP_LBL = re.compile(r"^RAMP\s*0?\d$", re.I)
-def measure_ramps(msp, rbox):
-    """يجد ليبلات 'RAMP 0N' داخل لوحة الرامبات ويقيس شريط كل رامب (bbox للجيومتري حوله) →
-    [(اسم, عرض_م, طول_م, مساحة_م²)]. الرامب شريط رأسي ضيّق، فنقيس امتداده الفعلي من اللوحة."""
-    xmin,xmax,ymin,ymax=rbox
-    labs=[]
-    for e in msp.query("TEXT MTEXT"):
-        t=" ".join((e.plain_text() if e.dxftype()=="MTEXT" else e.dxf.text).split())
-        if RAMP_LBL.match(t) and xmin<=e.dxf.insert.x<=xmax and ymin<=e.dxf.insert.y<=ymax:
-            labs.append((t.upper().replace(" ",""), e.dxf.insert.x, e.dxf.insert.y))
-    out=[]
-    for nm,lx,ly in labs:
-        xs=[];ys=[]
-        for e in msp.query("LINE LWPOLYLINE"):
-            if e.dxf.layer not in ("S -Beams","SLAB","ST-RFT-TOP","ST-RFT-BOT","S-OPENING"): continue
-            pp=[(e.dxf.start.x,e.dxf.start.y),(e.dxf.end.x,e.dxf.end.y)] if e.dxftype()=="LINE" else list(e.get_points("xy"))
-            for x,y in pp:
-                if abs(x-lx)<6000 and abs(y-ly)<22000: xs.append(x);ys.append(y)
-        if xs:
-            w=max(xs)-min(xs); h=max(ys)-min(ys)
-            out.append((nm, w/1000.0, h/1000.0, w*h/1e6))
-    return out
 
 def slab_area(msp, box, args):
     gx = slab_mesh.rebar_extent(msp, box)[0]
@@ -101,14 +77,15 @@ def main():
     # ---------- الرامبات (اختياري) ----------
     ramp=None
     if args.with_ramp:
-        rt=[x for x in titles if RAMP_TITLE in x[2].upper()]
+        base=args.ceiling.upper().replace("CEILING","").strip()   # "LOWER BASEMENT"/"UPPER BASEMENT"
+        rt=[x for x in titles if "RAMPS REINFORCEMENT PLAN" in x[2].upper() and base in x[2].upper()]
         if rt:
             rtx,rty,rttl=rt[0]; rbox=takeoff.plan_bbox(titles,rtx,rty)
             slope=math.sqrt(1+(args.ramp_slope_pct/100.0)**2)
             rbeams,_,runcl = br.extract_beams(msp,rbox)
             rv_beams, rbrows, rbno = beam_volume(rbeams, t_slab, slope)
             # مساحة بلاطة الرامب: تُقاس آلياً من شرائط RAMP 0N (أو --ramp-area للتجاوز)
-            strips = measure_ramps(msp, rbox)
+            strips = br.measure_ramps(msp, rbox)
             auto_area = sum(s[3] for s in strips) if strips else None
             rnet = args.ramp_area if args.ramp_area is not None else auto_area
             rv_slab = (rnet*slope*(t_slab/1000.0)) if rnet else None
@@ -116,7 +93,7 @@ def main():
                       net=rnet, auto_area=auto_area, strips=strips, v_slab=rv_slab,
                       beams=rbeams, v_beams=rv_beams, rbrows=rbrows, box=rbox)
         else:
-            print("تحذير: لم أجد لوحة الرامبات", RAMP_TITLE)
+            print(f"تحذير: لم أجد لوحة رامبات لـ '{base}'")
 
     # ---------- الطباعة ----------
     print(f"السقف: {ttl}  | سُمك البلاطة {t_slab:.0f}مم")

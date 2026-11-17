@@ -46,12 +46,27 @@ def main():
     bh = takeoff.find_title(titles, args.ceiling, "BOTTOM"); bbox = None
     if bh: bbox = takeoff.plan_bbox(titles, bh[0][0], bh[0][1])
 
-    # ---------- ADDITIONAL (top + bottom) ----------
+    # ---------- حلّ لوحة الرامبات (للبدروم) مرة واحدة ----------
+    ramp_box=None; ramp_slope=1.0
+    if args.with_ramp:
+        base=args.ceiling.upper().replace("CEILING","").strip()   # "LOWER BASEMENT" / "UPPER BASEMENT"
+        rt=[x for x in titles if "RAMPS REINFORCEMENT PLAN" in x[2].upper() and base in x[2].upper()]
+        if rt:
+            rtx,rty,_=rt[0]; ramp_box=takeoff.plan_bbox(titles,rtx,rty)
+            ramp_slope=math.sqrt(1+(args.ramp_slope_pct/100.0)**2)
+        else:
+            print(f"تحذير: لم أجد لوحة رامبات لـ '{base}' (RAMPS REINFORCEMENT PLAN FOR {base})")
+
+    # ---------- ADDITIONAL (top + bottom + ramp-slab bars) ----------
     allc = []; serial = 0
-    for label, box in [("علوي", tbox)] + ([("سفلي", bbox)] if bbox else []):
+    plan_boxes = [("علوي", tbox, 1.0)] + ([("سفلي", bbox, 1.0)] if bbox else [])
+    if ramp_box: plan_boxes.append(("رامب", ramp_box, ramp_slope))   # حديد بلاطة الرامب (T##-###-B) × ميل
+    for label, box, sc in plan_boxes:
         cs = takeoff.extract(msp, box)
         for c in sorted(cs, key=lambda c: (-c["y"], c["x"])):
-            serial += 1; c["serial"] = serial; c["_plan"] = label; allc.append(c)
+            serial += 1; c["serial"] = serial; c["_plan"] = label
+            if sc != 1.0 and c.get("L"): c["L"] = c["L"] * sc
+            allc.append(c)
     add_piv = collections.defaultdict(lambda: collections.defaultdict(int))  # dia -> L -> count
     add_len = collections.defaultdict(float); add_tot = collections.defaultdict(int)
     n_stair = 0
@@ -90,20 +105,13 @@ def main():
 
     # ---------- BEAMS (كمرات السقف: مقطع من الليبل، طول من S -Beams، تسليح من الجدول) ----------
     beams, blabels, bunclaimed = br.extract_beams(msp, tbox)
-    n_ramp_beams=0; ramp_slope=1.0
-    if args.with_ramp:
-        RAMP_TITLE="RAMPS REINFORCEMENT PLAN FOR LOWER BASEMENT"
-        rt=[x for x in titles if RAMP_TITLE in x[2].upper()]
-        if rt:
-            rtx,rty,_=rt[0]; rbox=takeoff.plan_bbox(titles,rtx,rty)
-            ramp_slope=math.sqrt(1+(args.ramp_slope_pct/100.0)**2)
-            rbeams,_,_=br.extract_beams(msp, rbox)
-            for b in rbeams:
-                if b.get("length"): b["length"]*=ramp_slope
-                b["ramp"]=True
-            beams+=rbeams; n_ramp_beams=len(rbeams)
-        else:
-            print("تحذير: لم أجد لوحة الرامبات", RAMP_TITLE)
+    n_ramp_beams=0
+    if ramp_box:
+        rbeams,_,_=br.extract_beams(msp, ramp_box)
+        for b in rbeams:
+            if b.get("length"): b["length"]*=ramp_slope
+            b["ramp"]=True
+        beams+=rbeams; n_ramp_beams=len(rbeams)
     bpiv, bdetails, bpermark = br.beam_rebar(beams)
     beam_len = {d: sum(L*n for L,n in bpiv[d].items())/1000.0 for d in bpiv}
     beam_tot_len = sum((bm["length"] or 0) for bm in beams)/1000.0
@@ -112,9 +120,15 @@ def main():
     except Exception: _bcut=None
     beam_stock={d:(_bcut[d]["stock_bars"] if _bcut else math.ceil(beam_len[d]/12.0)) for d in beam_len}
 
+    # ---------- RAMP SLAB MESH (شبكة بلاطة الرامب: كولّات T##-###-B على مساحة الرامب × ميل) ----------
+    rmesh={}; ramp_area=0.0; ramp_specs=[]
+    if ramp_box:
+        rmesh, ramp_area, _rstr, ramp_specs = br.ramp_slab_mesh_len(msp, ramp_box, ramp_slope)
+    ramp_mesh_stock={d:math.ceil(rmesh[d]/12.0) for d in rmesh}
+
     # ---------- grand total meters per diameter ----------
-    dias = sorted(set(list(add_len) + list(mesh_len) + list(beam_len)))
-    grand_m = {d: round(add_len.get(d, 0) + mesh_lenw.get(d, 0) + beam_len.get(d, 0)) for d in dias}  # تصميمي
+    dias = sorted(set(list(add_len) + list(mesh_len) + list(beam_len) + list(rmesh)))
+    grand_m = {d: round(add_len.get(d, 0) + mesh_lenw.get(d, 0) + beam_len.get(d, 0) + rmesh.get(d, 0)) for d in dias}  # تصميمي
     # فائض الإضافي (قطع كاملة) يُستعمل في الشبكة لنفس القطر: كل قطعة توفّر (طولها − وصلة) من صلب الشبكة
     mesh_reuse_bars = {}; mesh_buy = {}
     for d in mesh_len:
@@ -124,7 +138,7 @@ def main():
         mesh_buy[d] = math.ceil((mesh_lenw[d] - reuse_m) / 12.0)
         mesh_reuse_bars[d] = mesh_bars[d] - mesh_buy[d]
     # وزن الشراء = أسياخ الإضافي الفعلية + أسياخ الشبكة بعد خصم الفائض المُستعمَل
-    buy_bars = {d: add_stock.get(d, 0) + mesh_buy.get(d, 0) + beam_stock.get(d, 0) for d in dias}
+    buy_bars = {d: add_stock.get(d, 0) + mesh_buy.get(d, 0) + beam_stock.get(d, 0) + ramp_mesh_stock.get(d, 0) for d in dias}
     buy_w = {d: round(buy_bars[d] * 12.0 * d * d / 162.0) for d in dias}
 
     print(f"السقف: {ttl}")
@@ -134,7 +148,10 @@ def main():
           {f"Ø{d}": f"{round(mesh_lenw[d])} (×{mesh_f[d]:.3f})" for d in mesh_lenw})
     print(f"الكمرات: {len(beams)} جزء (span){f' منها {n_ramp_beams} رامب×ميل{ramp_slope:.4f}' if n_ramp_beams else ''} | طول {beam_tot_len:.1f}م | ليبلات غير مُلتقَطة {len(bunclaimed)} | (م/قطر):",
           {f"Ø{d}": round(beam_len[d]) for d in beam_len})
-    print("الإجمالي الكلي (م/قطر، شامل الكمرات):", {f"Ø{d}": grand_m[d] for d in dias})
+    if rmesh:
+        print(f"شبكة بلاطة الرامب: مساحة {ramp_area:.0f}م² × ميل{ramp_slope:.4f} | مواصفات {['T'+str(a)+'@'+str(b)+'-'+c for a,b,c in ramp_specs]} → (م/قطر):",
+              {f"Ø{d}": round(rmesh[d]) for d in rmesh})
+    print("الإجمالي الكلي (م/قطر، شامل الكمرات والرامب):", {f"Ø{d}": grand_m[d] for d in dias})
 
     # ---------- EXCEL ----------
     NAVY,BLUE,LT,GREY,GRN = "1F3864","2E5496","D9E1F2","F2F2F2","E2EFDA"
@@ -195,6 +212,16 @@ def main():
     st(ws.cell(r,2," ، ".join(f"Ø{d}={round(beam_len[d])}م" for d in bdias)),ha="right"); ws.merge_cells(f"B{r}:E{r}"); r+=1
     bw=round(sum(beam_len[d]*d*d/162.0 for d in bdias))
     st(ws.cell(r,1,"وزن حديد الكمرات (كجم)"),b=True,fill=LT); st(ws.cell(r,2,f"{bw}  ({round(bw/1000.0,2)} طن)"),b=True,fill=LT); ws.merge_cells(f"B{r}:E{r}"); r+=2
+    # (B3) ramp slab mesh
+    if rmesh:
+        ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,"◄ رابعاً: شبكة بلاطة الرامب (كولّات T##-###-B على مساحة الرامب × ميل)"),b=True,color="FFFFFF",fill=BLUE,ha="right"); r+=1
+        ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,f"مساحة الرامب {ramp_area:.0f} م² (مقاسة من شرائط RAMP) × معامل ميل {ramp_slope:.4f} | مواصفات: {' ، '.join('T'+str(a)+'@'+str(b)+' '+('علوي' if c=='T' else 'سفلي') for a,b,c in ramp_specs)}"),sz=9,fill=GRN,ha="right",wrap=True); ws.row_dimensions[r].height=30; r+=1
+        for h,c in [("القطر",1),("الطول (م)",2),("الوزن (كجم)",3)]: st(ws.cell(r,c,h),b=True,fill=NAVY,color="FFFFFF")
+        r+=1
+        for d in sorted(rmesh):
+            st(ws.cell(r,1,f"Ø{d}"),b=True,fill=LT); st(ws.cell(r,2,round(rmesh[d]))); st(ws.cell(r,3,round(rmesh[d]*d*d/162.0))); r+=1
+        rmw=round(sum(rmesh[d]*d*d/162.0 for d in rmesh))
+        st(ws.cell(r,1,"وزن شبكة الرامب (كجم)"),b=True,fill=LT); ws.merge_cells(f"B{r}:C{r}"); st(ws.cell(r,2,f"{rmw}  ({round(rmw/1000.0,2)} طن)"),b=True,fill=LT); r+=2
     # (C) grand total meters
     ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,"◄ الإجمالي الكلي لكل قطر (متر طولي = إضافي + شبكة + كمرات)"),b=True,color="FFFFFF",fill=NAVY,ha="right"); r+=1
     st(ws.cell(r,1,"القطر"),b=True,fill=BLUE,color="FFFFFF")
