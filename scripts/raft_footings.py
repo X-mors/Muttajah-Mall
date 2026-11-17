@@ -35,7 +35,8 @@ BUBBLE_LAYER    = "S -Beams"
 OUTDIR          = os.path.join(_ROOT, "output")
 
 def _default_dxf():
-    for p in sorted(glob.glob(os.path.join(_ROOT, "drawings", "*.dxf"))):
+    # الأحدث تاريخاً = المعتمدة (الأسماء مبدوءة بالتاريخ)؛ الأقدم مرجع فقط
+    for p in sorted(glob.glob(os.path.join(_ROOT, "drawings", "*.dxf")), reverse=True):
         return p
     return os.path.join(_ROOT, "drawings", "STR-MOTTAGAH.dxf")
 

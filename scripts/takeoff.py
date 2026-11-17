@@ -30,8 +30,9 @@ from openpyxl.utils import get_column_letter
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # جذر المستودع (scripts/ تحته)
 
 def _default_dxf():
-    """أول لوحة .dxf في مجلد drawings/ بالمستودع؛ وإلا مسار افتراضي (مرّر --dxf عند الاختلاف)."""
-    for p in sorted(glob.glob(os.path.join(_ROOT, "drawings", "*.dxf"))):
+    """أحدث لوحة .dxf في drawings/ (الأحدث تاريخاً = المعتمدة؛ الأقدم يبقى مرجعاً فقط). مرّر --dxf للاختلاف.
+    الأسماء مبدوءة بالتاريخ YYYY-MM-DD فالترتيب العكسي يضع الأحدث أولاً."""
+    for p in sorted(glob.glob(os.path.join(_ROOT, "drawings", "*.dxf")), reverse=True):
         return p
     return os.path.join(_ROOT, "drawings", "STR-MOTTAGAH.dxf")
 
