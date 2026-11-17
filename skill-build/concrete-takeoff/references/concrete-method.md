@@ -36,10 +36,52 @@ Levels found so far: Lower Basement ceiling −3.30 · Upper Basement ceiling �
 
 ## Volume
 
-`V(column) = (W/1000) × (H/1000) × net_height`, `net_height = storey_height − (0.32 if drop else 0.22)`,
+`V(column) = (W/1000) × (H/1000) × net_height`, `net_height = storey_height − top_deduction`,
 `storey_height = upper ceiling S.S.L − lower ceiling S.S.L` (per column, because levels step within a floor).
+`top_deduction` = **قاع العنصر الذي يعلو العمود** (engineer's rule: count the column up to the soffit of
+whatever sits over it — slab OR beam):
+- slab only → `0.22` (SLAB) or `0.32` (drop panel).
+- **a normal (downstand) beam over the column → the FULL beam depth `D`** (the column stops at the beam
+  soffit, which is `D − t_slab` lower than the slab soffit). So `net_height = storey_height − D_beam`.
+- an **inverted** beam over the column → back to the slab soffit (`0.22`): the beam projects UP, not down.
+
 Totals: per floor, grand total, and grand × 1.05 (concrete waste ≈ 5 %, unlike steel which is cut-exact).
 Cores (shear walls) are a separate block (section area from the drawn polygon, not W×H).
+
+## BEAMS — ceiling-beam concrete (submodule, planned)
+
+**Beam sections are NOT in a schedule** — the W×D section is written in **each beam's own label on the
+plan** as `MARK(W X D)` (e.g. `B2(300X600)`). The *reinforcement* table ("Beams Reinforcement Table",
+layer `00-EG-Text`: B1–B5 / CA1–CA4, Top/Bottom RFT + `5Ø8` stirrups) groups **reinforcement** by mark
+only — it carries no dimensions. **The same mark appears with several sections** (B2 = 300×600, 200×700,
+250×700, 250×600, 300×500, 300×700…), so the section is read **per label from the plan**, and the mark is
+used only to look up reinforcement later.
+
+Label encoding (423 labels):
+- Layers `ST-203-SLAB-TXT` (ceiling plans) + `BEAMS` (ramp / basement zone). **`S -Beams` = foundation
+  tie beams `S(WxD)` — a different element, excluded (handled by `raft_footings.py`).**
+- `MARK(W X D)` → width×depth (mm). Variable depth `MARK(W X D1/D2)` (e.g. `B5(300X600/1350)`,
+  `B3(300X400/850)`) = two depths (haunch/step); the two bare numbers are drawn on `BEAMS` at each depth.
+- `INVERTED` / `INV.` prefix-or-suffix = upstand beam (projects above the slab). 48 labels.
+- Marks seen on plan: B1 B2 B3 B4 B5 CA2 CA3 CA4 (CA1 = reinforcement table only, no plan label).
+
+**Concrete rule (engineer):** a beam is cast monolithic with the slab, overlapping it by the slab
+thickness, so the **beam takeoff counts only the stem BELOW the slab** — the part within the slab
+thickness already belongs to the slab area, and counting it again would double-count.
+
+```
+exposed stem depth = D − t_slab          (e.g. slab 200, beam 300×700 → 500 mm exposed)
+V(beam) = (W/1000) × ((D − t_slab)/1000) × L        (م³)      t_slab = SLAB=220mm (read per ceiling)
+```
+
+- **L (length)** = measured from the beam's drawn centerline/polyline on `BEAMS` (LINE/LWPOLYLINE),
+  associated to its label by position. This is the one part still to implement/verify.
+- **Variable depth:** use `((D1+D2)/2 − t_slab)`, or split into two runs if the break point is dimensioned.
+- **Inverted:** same added volume `W × (D − t_slab) × L` (it just projects up instead of down).
+- Per-ceiling totals + grand total × 1.05 (5 % concrete waste), same as columns.
+
+Status: **documented, not yet coded.** Build `beams_takeoff.py` when the user requests a ceiling takeoff —
+label+section parsing is proven here; label↔geometry length association is the open task.
 
 ## Serial numbering (review drawing)
 

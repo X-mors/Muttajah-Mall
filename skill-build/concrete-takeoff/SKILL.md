@@ -9,8 +9,10 @@ description: >-
   S.S.L ceiling levels, SLAB thickness and the drop-panel number are read from the ceiling plans. Outputs
   a per-column Excel (serial, mark, section, height, volume + total) and a review drawing with a numbered
   circle on every column matching the Excel rows. Use for حصر خرسانة الأعمدة / كمية أو حجم خرسانة الأعمدة
-  (م³) / concrete volume of columns per floor. Do NOT use it to COUNT columns (that is columns-takeoff),
-  for slab/ceiling concrete (a later submodule), or for rebar.
+  (م³) / concrete volume of columns per floor. Also covers حصر خرسانة كمرات السقف (ceiling-BEAM concrete):
+  section read per-label from the plan as MARK(WxD), volume = W×(depth−slab)×length for the below-slab stem
+  only (so beam and slab aren't double-counted) — see references/concrete-method.md (BEAMS). Do NOT use it
+  to COUNT columns (that is columns-takeoff) or for rebar.
 compatibility: Requires Python 3 with ezdxf and openpyxl. DWG⇄DXF conversion needs the ODA File Converter.
 ---
 
@@ -45,6 +47,25 @@ top deduction = 0.22 m (slab)   OR   0.32 m (drop panel, where one sits over tha
   column takes the nearest S.S.L to it — not one height per floor.
 - **Cores** (CORE1/2/3, shear walls) are NOT W×H rectangles — handled separately, excluded from the
   column table.
+- **Column top deduction = the soffit of what sits over it** (المهندس: حتى قاع السقف أو الكمرة): slab
+  only → 0.22/0.32; a **normal beam over the column → deduct the full beam depth D** (column stops at the
+  beam soffit); an **inverted** beam → back to the slab soffit (0.22).
+
+## حصر خرسانة كمرات السقف (BEAMS submodule — planned)
+
+عند طلب **حصر خرسانة سقف**: كل كمرة مقطعها مكتوب في ليبلها على المسقط `MARK(العرض×العمق)` (مثل
+`B2(300X600)`) — **لا يوجد جدول أبعاد**؛ جدول "Beams Reinforcement Table" يعطي التسليح فقط، والماركة
+الواحدة لها مقاطع متعددة فيُقرأ المقطع لكل كمرة من ليبلها. الكمرة متداخلة مع البلاطة بسُمك البلاطة،
+فيُحصَر منها **الظاهر أسفل البلاطة فقط** حتى لا تُحسب مرتين:
+
+```
+الظاهر = العمق D − سُمك البلاطة t         (بلاطة 200، كمرة 300×700 → 500مم)
+حجم الكمرة = العرض W × (D − t) × الطول L   (م³)
+```
+
+الطول من جيومتري الكمرة على طبقة `BEAMS`؛ العمق المتغيّر `D1/D2` يُتوسَّط أو يُقسَّم؛ `INVERTED`/`INV.`
+= كمرة مقلوبة (نفس المعادلة). **موثّق ولم يُبرمَج بعد** — يُبنى `beams_takeoff.py` عند الطلب.
+التفاصيل الكاملة والماركات في `references/concrete-method.md` (قسم BEAMS) و `reference/project-reference.yaml` (`beams`).
 
 ## What the drawing gives (auto-extracted) — `references/concrete-method.md` for the exact encoding
 
