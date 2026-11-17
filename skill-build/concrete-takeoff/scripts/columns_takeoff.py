@@ -20,7 +20,8 @@ from openpyxl.utils import get_column_letter
 # مسارات محمولة نسبةً للمستودع (scripts/ تحت الجذر، واللوحة في drawings/)
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def _default_dxf():
-    for p in sorted(glob.glob(os.path.join(_ROOT, "drawings", "*.dxf"))):
+    # الأحدث تاريخاً = المعتمدة (الأسماء مبدوءة بالتاريخ)؛ الأقدم مرجع فقط
+    for p in sorted(glob.glob(os.path.join(_ROOT, "drawings", "*.dxf")), reverse=True):
         return p
     return os.path.join(_ROOT, "drawings", "STR-MOTTAGAH.dxf")
 DEFAULT_DXF = _default_dxf()

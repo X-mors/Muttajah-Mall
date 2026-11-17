@@ -101,4 +101,4 @@ reports the level ZONES per floor and uses the dominant height; the engineer nam
 (like `--drop-serials`) to raise their height. Total impact of the stepped minority is small (~2–3 %).
 
 **Pending:** the repeated-floor / roof S.S.L levels (engineer sending a sheet) for the other stages;
-optional drop-panel per-column detection. Reference drawing: `drawings/2026-09-27-STR-MOTTAGAH.dxf` in the repo.
+optional drop-panel per-column detection. The tool auto-picks the **newest** `drawings/*.dxf` (current working drawing: `drawings/2026-11-08-STR-MOTTAGAH.dxf`; earlier dated sheets are reference-only). Pass `--dxf` to override.

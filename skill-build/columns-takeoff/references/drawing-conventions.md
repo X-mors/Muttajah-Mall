@@ -1,8 +1,10 @@
 # COLUMNS & AXES — drawing conventions & method
 
 Detail behind `SKILL.md`. Read this when a count looks wrong, when adapting the script to a new sheet, or
-when deciding how to treat an ambiguous mark. Everything here was verified against the reference drawing
-`2026-09-22-STR-MOTTAGAH.dxf` (sheet title `COLUMNS&AXES`).
+when deciding how to treat an ambiguous mark. The conventions below were originally verified against the
+baseline sheet `2026-09-22-STR-MOTTAGAH.dxf` (sheet title `COLUMNS&AXES`). **Current working drawing:
+`drawings/2026-11-08-STR-MOTTAGAH.dxf`** — the tool auto-picks the newest `drawings/*.dxf`; earlier dated
+sheets (incl. the baseline below) are reference-only.
 
 ## Table of contents
 1. What is on the sheet
@@ -69,8 +71,8 @@ so a normal render shows empty bubbles and an unlabelled plan — misleading if 
 extractor reads entity text directly, so this doesn't affect counts. For a human-checkable image, recolour
 text to black before plotting (`e.rgb = (0,0,0)`); that is exactly what `--debug-render` does.
 
-## 7. The reference tally (for regression)
-`2026-09-22-STR-MOTTAGAH.dxf`, sheet `COLUMNS&AXES`:
+## 7. The reference tally (for regression — historical baseline)
+`2026-09-22-STR-MOTTAGAH.dxf`, sheet `COLUMNS&AXES` (baseline for regression; current working drawing is `2026-11-08`):
 
 | mark | count | base section | vertical |
 |------|------:|--------------|----------|
