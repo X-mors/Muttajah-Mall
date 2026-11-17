@@ -47,6 +47,10 @@ already validated.
      `SUPPORT_FRAC`, cover/hooks) are explicit constants at the top of `beams_rebar.py` — tune per office.
    - Coverage: beam length comes from drawn edge-pairs; a few polyline-drawn beams or repeated per-span
      labels are reported as "ليبلات غير مُلتقَطة" — verify them on the review drawing.
+   - **Ramps:** `full_takeoff.py "LOWER BASEMENT CEILING" --with-ramp --ramp-slope-pct <p>` also pulls the
+     **ramp beams** from the "RAMPS REINFORCEMENT PLAN FOR LOWER BASEMENT" sheet and scales their length by
+     the slope factor `√(1+(p/100)²)` (ramps are inclined), merging them into the beam steel. Ramp-beam
+     coverage is partial (verify on review); ramp **slab mesh** needs the ramp area/spec and is not auto-added.
    (Beam concrete volume is the separate **ceiling-concrete-takeoff** skill.)
 
 3. **Complete ceiling takeoff** (both of the above in one deliverable): `scripts/full_takeoff.py

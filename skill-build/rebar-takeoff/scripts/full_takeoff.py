@@ -35,6 +35,8 @@ def main():
     ap.add_argument("--lap", type=int, default=60, help="مضاعف طول وصلة التراكب (×القطر): للشبكة الرئيسية، وللتفريد >12م. 60 شد/40 ضغط")
     ap.add_argument("--conservative", action="store_true", help="احتسب قصاصة آخر سيخ لكل مجرى شبكة. الافتراضي: تراكب فقط (محسّن)")
     ap.add_argument("--include-mesh", dest="include_mesh", action="store_true", help="أظهِر الشبكة في جدول التفريد")
+    ap.add_argument("--with-ramp", action="store_true", help="أضِف كمرات الرامب (لوحة RAMPS للبدروم) لحصر الحديد")
+    ap.add_argument("--ramp-slope-pct", type=float, default=0.0, help="ميل الرامب ٪ → يُضرب طول كمرات الرامب في sqrt(1+(p/100)^2)")
     args = ap.parse_args()
     args.reuse = not args.conservative   # الافتراضي = محسّن (تراكب فقط لمجاري الشبكة)
     doc = ezdxf.readfile(args.dxf); msp = doc.modelspace(); titles = takeoff.all_titles(msp)
@@ -88,6 +90,20 @@ def main():
 
     # ---------- BEAMS (كمرات السقف: مقطع من الليبل، طول من S -Beams، تسليح من الجدول) ----------
     beams, blabels, bunclaimed = br.extract_beams(msp, tbox)
+    n_ramp_beams=0; ramp_slope=1.0
+    if args.with_ramp:
+        RAMP_TITLE="RAMPS REINFORCEMENT PLAN FOR LOWER BASEMENT"
+        rt=[x for x in titles if RAMP_TITLE in x[2].upper()]
+        if rt:
+            rtx,rty,_=rt[0]; rbox=takeoff.plan_bbox(titles,rtx,rty)
+            ramp_slope=math.sqrt(1+(args.ramp_slope_pct/100.0)**2)
+            rbeams,_,_=br.extract_beams(msp, rbox)
+            for b in rbeams:
+                if b.get("length"): b["length"]*=ramp_slope
+                b["ramp"]=True
+            beams+=rbeams; n_ramp_beams=len(rbeams)
+        else:
+            print("تحذير: لم أجد لوحة الرامبات", RAMP_TITLE)
     bpiv, bdetails, bpermark = br.beam_rebar(beams)
     beam_len = {d: sum(L*n for L,n in bpiv[d].items())/1000.0 for d in bpiv}
     beam_tot_len = sum((bm["length"] or 0) for bm in beams)/1000.0
@@ -116,7 +132,7 @@ def main():
     print(f"الشبكة: صافي {net:.0f}م² | مواصفات:", [f"{n['face']} T{n['dia']}@{n['sp']}" for n in notes])
     print(f"الشبكة (م/قطر، وصلات {args.lap}×قطر{' تراكب-فقط' if args.reuse else ''}):",
           {f"Ø{d}": f"{round(mesh_lenw[d])} (×{mesh_f[d]:.3f})" for d in mesh_lenw})
-    print(f"الكمرات: {len(beams)} جزء (span) | طول {beam_tot_len:.1f}م | ليبلات غير مُلتقَطة {len(bunclaimed)} | (م/قطر):",
+    print(f"الكمرات: {len(beams)} جزء (span){f' منها {n_ramp_beams} رامب×ميل{ramp_slope:.4f}' if n_ramp_beams else ''} | طول {beam_tot_len:.1f}م | ليبلات غير مُلتقَطة {len(bunclaimed)} | (م/قطر):",
           {f"Ø{d}": round(beam_len[d]) for d in beam_len})
     print("الإجمالي الكلي (م/قطر، شامل الكمرات):", {f"Ø{d}": grand_m[d] for d in dias})
 
@@ -162,7 +178,7 @@ def main():
     r+=1
     # (B2) beams
     ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,"◄ ثالثاً: حديد الكمرات — تسليح الجدول × أطوال اللوحة (per-span)"),b=True,color="FFFFFF",fill=BLUE,ha="right"); r+=1
-    ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,f"عدد الأجزاء (spans) {len(beams)} | إجمالي طول الكمرات {beam_tot_len:.1f} م | ليبلات غير مُلتقَطة الطول {len(bunclaimed)} (راجعها على اللوحة) | افتراضات تفصيل: إرساء {br.ANCHOR_MM}مم، سيخ شدّ علوي {br.SUPPORT_FRAC:g}×الطول، كانات 5/م Ø8"),sz=9,fill=GRN,ha="right",wrap=True); ws.row_dimensions[r].height=30; r+=1
+    ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,f"عدد الأجزاء (spans) {len(beams)}{f' — منها {n_ramp_beams} كمرة رامب (الطول × معامل ميل {ramp_slope:.4f})' if n_ramp_beams else ''} | إجمالي طول الكمرات {beam_tot_len:.1f} م | ليبلات غير مُلتقَطة الطول {len(bunclaimed)} (راجعها على اللوحة) | افتراضات تفصيل: إرساء {br.ANCHOR_MM}مم، سيخ شدّ علوي {br.SUPPORT_FRAC:g}×الطول، كانات 5/م Ø8"),sz=9,fill=GRN,ha="right",wrap=True); ws.row_dimensions[r].height=42; r+=1
     for h,c in [("الماركة",1),("عدد الأجزاء",2),("إجمالي الطول (م)",3),("القطاعات (WxD)",4),("التسليح (علوي L/C/R · سفلي · كانات)",5)]:
         st(ws.cell(r,c,h),b=True,fill=NAVY,color="FFFFFF")
     r+=1
