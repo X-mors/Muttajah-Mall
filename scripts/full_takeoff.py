@@ -270,12 +270,21 @@ def main():
         for j,v in enumerate(row,1): st(ws2.cell(i+1,j,v),fill=fill)
     for j,wd in enumerate([6,7,7,8,7,9,8,7,9,10,10],1): ws2.column_dimensions[get_column_letter(j)].width=wd
     ws2.freeze_panes="A2"
+    def _is_ramp_void(a2,w,h):   # شريط كبير ضيّق = فتحة رامب (تُخصَم من البلاطة وتُضاف كبلاطة رامب منفصلة)
+        return ramp_box and a2>30 and max(w,h)/max(min(w,h),1)>4
     ws3=wb.create_sheet("الفتحات"); ws3.sheet_view.rightToLeft=True
-    for j,h in enumerate(["الرقم","المساحة (م²)","العرض(مم)","الطول(مم)","x","y"],1): st(ws3.cell(1,j,h),b=True,fill=NAVY,color="FFFFFF")
+    for j,h in enumerate(["الرقم","المساحة (م²)","العرض(مم)","الطول(مم)","x","y","ملاحظة"],1): st(ws3.cell(1,j,h),b=True,fill=NAVY,color="FFFFFF")
+    ramp_void_area=0.0
     for i,(a2,cx,cy,w,h) in enumerate(ops,1):
-        for j,v in enumerate([i,round(a2,1),round(w),round(h),round(cx),round(cy)],1): st(ws3.cell(i+1,j,v))
+        note=""
+        if _is_ramp_void(a2,w,h): note="فتحة رامب (مخصومة من البلاطة ومُضافة كبلاطة رامب منفصلة بتسليحها)"; ramp_void_area+=a2
+        for j,v in enumerate([i,round(a2,1),round(w),round(h),round(cx),round(cy),note],1):
+            st(ws3.cell(i+1,j,v),fill=("FFF2CC" if note else None))
     st(ws3.cell(len(ops)+2,1,"الإجمالي"),b=True,fill=LT); st(ws3.cell(len(ops)+2,2,round(sum(o[0] for o in ops),1)),b=True,fill=LT)
-    for j,wd in enumerate([6,12,10,10,10,10],1): ws3.column_dimensions[get_column_letter(j)].width=wd
+    if ramp_void_area:
+        st(ws3.cell(len(ops)+3,1,"منها فتحات رامب"),b=True,fill=GRN); st(ws3.cell(len(ops)+3,2,round(ramp_void_area,1)),b=True,fill=GRN)
+        st(ws3.cell(len(ops)+3,7,"الرامب مُضاف كبلاطة بتسليحه (شبكة + كمرات) — ليس مفقوداً"),fill=GRN)
+    for j,wd in enumerate([6,12,10,10,10,10,38],1): ws3.column_dimensions[get_column_letter(j)].width=wd
 
     # beams detail sheet (per span)
     ws4=wb.create_sheet("الكمرات"); ws4.sheet_view.rightToLeft=True
