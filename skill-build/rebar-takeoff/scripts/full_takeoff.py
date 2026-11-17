@@ -277,7 +277,7 @@ def main():
     ramp_void_area=0.0
     for i,(a2,cx,cy,w,h) in enumerate(ops,1):
         note=""
-        if _is_ramp_void(a2,w,h): note="فتحة رامب (مخصومة من البلاطة ومُضافة كبلاطة رامب منفصلة بتسليحها)"; ramp_void_area+=a2
+        if _is_ramp_void(a2,w,h): note="فتحة رامب: السقف أعلى الرامب فالفتحة قد تصغر عنه (طبيعي). تُخصَم بمقاسها من السقف، والرامب يُحسَب ويُضاف لوحده (حديد+خرسانة)"; ramp_void_area+=a2
         for j,v in enumerate([i,round(a2,1),round(w),round(h),round(cx),round(cy),note],1):
             st(ws3.cell(i+1,j,v),fill=("FFF2CC" if note else None))
     st(ws3.cell(len(ops)+2,1,"الإجمالي"),b=True,fill=LT); st(ws3.cell(len(ops)+2,2,round(sum(o[0] for o in ops),1)),b=True,fill=LT)
