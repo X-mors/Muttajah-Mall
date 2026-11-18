@@ -51,6 +51,7 @@ def main():
     ap.add_argument("--with-ramp", action="store_true", help="أضِف كمرات رامبات البدروم (لوحة RAMPS) على ميل")
     ap.add_argument("--ramp-slope-pct", type=float, default=0.0, help="ميل الرامب ٪ (rise/run). المعامل=sqrt(1+(p/100)^2)")
     ap.add_argument("--ramp-area", type=float, default=None, help="مساحة بلاطة الرامب المسقطية م² (من المهندس/اللوحة) — لا تُقاس آلياً بثقة")
+    ap.add_argument("--ramp-slab", type=float, default=None, help="سُمك بلاطة الرمب مم (افتراضي: السفلي 160 / العلوي 220 تلقائياً من اسم السقف)")
     args=ap.parse_args()
     doc=ezdxf.readfile(args.dxf); msp=doc.modelspace(); titles=takeoff.all_titles(msp)
     th=takeoff.find_title(titles, args.ceiling, "TOP")
@@ -82,14 +83,19 @@ def main():
         if rt:
             rtx,rty,rttl=rt[0]; rbox=takeoff.plan_bbox(titles,rtx,rty)
             slope=math.sqrt(1+(args.ramp_slope_pct/100.0)**2)
+            # سُمك بلاطة الرمب: السفلي 160 / العلوي 220 (مؤكّد من المهندس) — أو --ramp-slab للتجاوز
+            if args.ramp_slab is not None: t_ramp=float(args.ramp_slab)
+            elif "LOWER" in base: t_ramp=160.0
+            elif "UPPER" in base: t_ramp=220.0
+            else: t_ramp=t_slab
             rbeams,_,runcl = br.extract_beams(msp,rbox)
-            rv_beams, rbrows, rbno = beam_volume(rbeams, t_slab, slope)
+            rv_beams, rbrows, rbno = beam_volume(rbeams, t_ramp, slope)
             # مساحة بلاطة الرامب: تُقاس آلياً من شرائط RAMP 0N (أو --ramp-area للتجاوز)
             strips = br.measure_ramps(msp, rbox)
             auto_area = sum(s[3] for s in strips) if strips else None
             rnet = args.ramp_area if args.ramp_area is not None else auto_area
-            rv_slab = (rnet*slope*(t_slab/1000.0)) if rnet else None
-            ramp=dict(title=rttl, slope_pct=args.ramp_slope_pct, slope=slope,
+            rv_slab = (rnet*slope*(t_ramp/1000.0)) if rnet else None
+            ramp=dict(title=rttl, slope_pct=args.ramp_slope_pct, slope=slope, t_ramp=t_ramp,
                       net=rnet, auto_area=auto_area, strips=strips, v_slab=rv_slab,
                       beams=rbeams, v_beams=rv_beams, rbrows=rbrows, box=rbox)
         else:
@@ -103,8 +109,8 @@ def main():
     if ramp:
         for nm,w,h,a in ramp.get("strips",[]):
             print(f"   {nm}: {w:.1f}×{h:.1f}م = {a:.1f} م² (مسقطي)")
-        rslab = f"{ramp['v_slab']:.1f} م³ (مساحة {ramp['net']:.0f}م²)" if ramp['v_slab'] is not None else "— (لا مساحة)"
-        print(f"الرامب (ميل {ramp['slope_pct']:g}٪، معامل {ramp['slope']:.4f}): بلاطة {rslab} | كمرات {len(ramp['beams'])} جزء → {ramp['v_beams']:.1f} م³")
+        rslab = f"{ramp['v_slab']:.1f} م³ (مساحة {ramp['net']:.0f}م² × سُمك {ramp['t_ramp']:.0f}مم)" if ramp['v_slab'] is not None else "— (لا مساحة)"
+        print(f"الرامب (ميل {ramp['slope_pct']:g}٪، معامل {ramp['slope']:.4f}، سُمك بلاطة {ramp['t_ramp']:.0f}مم): بلاطة {rslab} | كمرات {len(ramp['beams'])} جزء → {ramp['v_beams']:.1f} م³")
         sub += (ramp['v_slab'] or 0)+ramp['v_beams']
     print(f"الإجمالي{'(بدون بلاطة الرامب)' if (ramp and ramp['v_slab'] is None) else ''}: {sub:.1f} م³  | + هدر 5٪ = {sub*WASTE:.1f} م³")
 
@@ -145,12 +151,12 @@ def main():
     r+=1
     # ramp
     if ramp:
-        ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,f"◄ الرامبات (على ميل {ramp['slope_pct']:g}٪ → معامل {ramp['slope']:.4f})"),b=True,color="FFFFFF",fill=BLUE,ha="right"); r+=1
+        ws.merge_cells(f"A{r}:F{r}"); st(ws.cell(r,1,f"◄ الرامبات (سُمك بلاطة {ramp['t_ramp']:.0f}مم | ميل {ramp['slope_pct']:g}٪ → معامل {ramp['slope']:.4f})"),b=True,color="FFFFFF",fill=BLUE,ha="right"); r+=1
         for nm,w,h,a in ramp.get("strips",[]):
             st(ws.cell(r,1,nm),fill=GREY); st(ws.cell(r,2,f"{w:.1f}×{h:.1f}م"),ha="center"); st(ws.cell(r,3,f"{a:.1f} م² مسقطي"),ha="center"); ws.merge_cells(f"C{r}:D{r}"); r+=1
         if ramp['v_slab'] is not None:
             src="مقاس آلياً" if (args.ramp_area is None) else "مُدخَل يدوياً"
-            st(ws.cell(r,1,"بلاطة الرامب (م³)"),b=True,fill=LT); st(ws.cell(r,2,f"{ramp['net']:.0f}م² ({src}) × ميل × {t_slab/1000:.3f}"),ha="right"); ws.merge_cells(f"B{r}:D{r}"); st(ws.cell(r,5,round(ramp['v_slab'],2)),b=True,fill=LT); r+=1
+            st(ws.cell(r,1,"بلاطة الرامب (م³)"),b=True,fill=LT); st(ws.cell(r,2,f"{ramp['net']:.0f}م² ({src}) × ميل × {ramp['t_ramp']/1000:.3f}"),ha="right"); ws.merge_cells(f"B{r}:D{r}"); st(ws.cell(r,5,round(ramp['v_slab'],2)),b=True,fill=LT); r+=1
         else:
             st(ws.cell(r,1,"بلاطة الرامب (م³)"),b=True,fill="FFF2CC"); st(ws.cell(r,2,"لم أجد شرائط رامب — مرّر --ramp-area"),ha="right",fill="FFF2CC"); ws.merge_cells(f"B{r}:E{r}"); r+=1
         st(ws.cell(r,1,"كمرات الرامب (م³)"),b=True,fill=LT); st(ws.cell(r,2,f"{len(ramp['beams'])} جزء × ميل"),ha="right"); ws.merge_cells(f"B{r}:D{r}"); st(ws.cell(r,5,round(ramp['v_beams'],2)),b=True,fill=LT); r+=1
