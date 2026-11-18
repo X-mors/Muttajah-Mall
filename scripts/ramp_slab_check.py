@@ -120,7 +120,9 @@ def main():
         print(f"عزم ميت متزامن {veh['M_DL_ult']:.1f} → متبقٍّ للعجلة {veh['M_avail']:.1f} kN·m/م | عرض فعّال {veh['b_eff']:.2f}م")
         print(f"أقصى عجلة: انثناء {veh['P_ult']:.0f} / ثقب {veh['P_punch_ult']:.0f} kN (الحاكم: {veh['gov']} {veh['P_gov_ult']:.0f} kN نهائي)")
         print(f"→ عجلة ثابتة {veh['P_static']:.1f} kN ({veh['P_static']/9.81:.1f} طن) | **أقصى وزن مركبة ≈ {veh['W_vehicle']:.0f} kN = {veh['W_vehicle']/9.81:.1f} طن**")
-        print(f"  (معامل حي {args.llf} × صدم {args.impact}؛ عزم سالب ميت عند الحائط {veh['M_neg_DL']:.1f} kN·m/م → يلزم حديد علوي)")
+        topnote=("حديد علوي غير مطلوب (بسيطة الارتكاز، شبكة سفلية فقط)" if args.support=="ss"
+                 else f"عزم سالب عند الركيزة {veh['M_neg_DL']:.1f} kN·m/م يلزمه حديد علوي — غير موجود!")
+        print(f"  (معامل حي {args.llf} × صدم {args.impact}؛ {topnote})")
 
     # ── Excel ──
     NAVY,BLUE,LT,GRN,RED,GREY="1F3864","2E5496","D9E1F2","E2EFDA","F8CBAD","F2F2F2"
@@ -167,7 +169,10 @@ def main():
         row("أقصى عجلة — ثقب (punching)", f"{veh['P_punch_ult']:.0f} kN", f"qcup={veh['qcup']:.2f} (غير حاكم)", )
         row("أقصى حمل عجلة ثابت", f"{veh['P_static']:.1f} kN = {veh['P_static']/9.81:.1f} طن", f"÷(حي {args.llf}×صدم {args.impact})", fill=LT)
         ws.merge_cells(f"A{r}:D{r}"); st(ws.cell(r,1,f"◄◄ أقصى وزن مركبة ({args.wheels} عجلات) ≈ {veh['W_vehicle']:.0f} kN = {veh['W_vehicle']/9.81:.1f} طن (الحاكم: {veh['gov']})"),b=True,sz=12,color="FFFFFF",fill=NAVY,ha="center"); ws.row_dimensions[r].height=24; r+=1
-        row("عزم سالب ميت عند الحائط", f"{veh['M_neg_DL']:.1f} kN·m/م", "يلزم حديد علوي عند الحائط — غير مُراجَع", fill=RED)
+        if args.support=="ss":
+            row("حديد علوي", "غير مطلوب", "بسيطة الارتكاز (شبكة سفلية فقط) — لا عزوم سالبة", fill=GRN)
+        elif veh['M_neg_DL']>0:
+            row("عزم سالب ميت عند الركيزة", f"{veh['M_neg_DL']:.1f} kN·m/م", "يلزم حديد علوي — غير موجود (شبكة سفلية فقط)!", fill=RED)
     hdr("الخلاصة والتنبيهات")
     verdict = "المقطع كافٍ للحمل الحي القياسي (≈4 kN/m² جراج) كبلاطة مستمرة" if util_cont<=1 else "راجع — الاستغلال يتجاوز 100٪"
     ws.merge_cells(f"A{r}:D{r}"); st(ws.cell(r,1,"الحكم (تحت الافتراضات): "+verdict),b=True,fill=(GRN if util_cont<=1 else RED),ha="right",wrap=True); ws.row_dimensions[r].height=30; r+=1
