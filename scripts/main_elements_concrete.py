@@ -24,9 +24,10 @@ BASE_WALL  = -6.75     # ظهر الجدار الشمالي (مارك C)
 BASE_RAFT  = -8.45     # وش اللبشة (باقي الأعمدة)
 RAMP_THK   = 0.16      # سماكة الرمب — تُخصم من ارتفاع أعمدة زون الرمب (تخترق الرمب)
 RAMP_EDGE  = 4500      # زون الرمب: الأعمدة ضمن هذه المسافة من حافة المسقط يسار/يمين (RAMP04/03)
-WALL_THK   = 0.25      # سماكة الحائط المحيطي (مفترض — الجدران غير مرسومة في الـDXF الإنشائي)
-STARTER_THK= 0.20      # سماكة بادئ الرمب (مفترض — من السيكشن)
-STARTER_H  = 1.00      # ارتفاع بادئ الرمب (مفترض — من السيكشن)
+WALL_THK   = 0.30      # سماكة الجدار المحيطي — مُستخرَج من بلوك R.WALL_DETAILS (300مم)
+CORE_THK   = 0.30      # سماكة جدران الأكوار — مُستخرَج من بلوك ST_WAll (300مم ×21)
+STARTER_THK= 0.20      # سماكة بادئ الرمب (من السيكشن)
+STARTER_H  = 1.00      # ارتفاع بادئ الرمب (من السيكشن)
 WASTE      = 1.05
 
 def main():
@@ -157,7 +158,7 @@ def main():
     # الأكوار (مساحة مقطع غير مُستخرَجة بثقة) + الخزان (غير مرسوم) → مُعلَّقان
     ws3=wb.create_sheet("الحوائط وبادئ الرمب"); ws3.sheet_view.rightToLeft=True
     ws3.merge_cells("A1:E1"); st(ws3["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws3["A1"]="الحوائط المحيطة + بادئ الرمب"
-    ws3.merge_cells("A2:E2"); st(ws3.cell(2,1,f"الأطوال من أبعاد المبنى ({fx:.1f}×{fy:.1f}م). W1 ظاهر 1.70م، W4 حتى قاع السقف (ارتفاع {Hw}م). ⚠️ السماكة مفترضة {WALL_THK}م (الجدران غير مرسومة في الـDXF)."),sz=9,fill=YEL,ha="right",wrap=True); ws3.row_dimensions[2].height=30
+    ws3.merge_cells("A2:E2"); st(ws3.cell(2,1,f"الأطوال من أبعاد المبنى ({fx:.1f}×{fy:.1f}م). W1 ظاهر 1.70م (بلوك rwall 2m)، W4 حتى قاع السقف (ارتفاع {Hw}م، بلوك R.WALL_DETAILS). السماكة {WALL_THK}م مُستخرَجة من البلوكات."),sz=9,fill=GRN,ha="right",wrap=True); ws3.row_dimensions[2].height=30
     for j,h in enumerate(["العنصر","الطول م","الارتفاع م","السماكة م","الحجم م³"],1): st(ws3.cell(3,j,h),b=True,fill=NAVY,color="FFFFFF")
     r3=4
     for nm,L,H,T,V in walls:
