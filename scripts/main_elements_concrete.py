@@ -47,6 +47,7 @@ def main():
     # منسوب قاعدة كل عمود من منطقته (أداة column_base_levels) — يُستدعى قبل الحصر
     bl = cbl.column_bases(msp)
     base_map = {(round(o["x"]), round(o["y"])): (o["base"], o["zone"]) for o in bl}
+    end_map = cbl.column_ends(msp, ceil_ssl=args.ceil)   # نهاية كل عمود: خصم الهابط/الكمرة/البلاطة
 
     # ترتيب الأعمدة (أعلى→أسفل ثم يسار→يمين) وترقيمها
     colcols=[c for c in cols if not c[1].startswith("CORE")]
@@ -57,10 +58,11 @@ def main():
     for i,(sn,m,x,y) in enumerate(colcols,1):
         wh=stages_by_mark.get(m,[None])[0] if m in stages_by_mark else None
         base, zone = base_map.get((round(x),round(y)), (BASE_RAFT, f"المات {BASE_RAFT}"))
+        end = end_map.get((round(x),round(y)), soffit)   # منسوب نهاية العمود (قاع الهابط/الكمرة/البلاطة)
         wall = (m=="C")
         # زون الرمب: الأعمدة عند حافة المسقط (يسار RAMP04 / يمين RAMP03) غير أعمدة الجدار → تخترق الرمب
         ramp = (not wall) and (x < xmin+RAMP_EDGE or x > xmax-RAMP_EDGE)
-        h = round(soffit - base - (RAMP_THK if ramp else 0.0), 3)
+        h = round(end - base - (RAMP_THK if ramp else 0.0), 3)
         if ramp: n_ramp+=1
         if wh:
             W,D=wh[0]/1000.0, wh[1]/1000.0; v=W*D*h

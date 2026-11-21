@@ -77,7 +77,49 @@ def column_bases(msp, verbose=False):
         print(f"تحقق: أعمدة تقيلة على قواعد مُثخّنة = {onf}/{len(heavy)}")
     return out
 
+def column_ends(msp, ceil_ssl=-3.85):
+    """منسوب نهاية كل عمود = ceil_ssl ناقص (بلاطة 0.22 / هابط 0.32 / عمق الكمرة فوقه).
+    يحاذي لوحة سقف البدروم السفلي (هوابط S-TEXT + كمرات S -Beams) بالأعمدة ويربط كل عمود بما فوقه.
+    يعيد {(round(x),round(y)): end_level}."""
+    import takeoff, beams_rebar as br, re, math
+    titles=takeoff.all_titles(msp)
+    th=takeoff.find_title(titles,"LOWER BASEMENT CEILING","TOP")
+    plan,_=ct.collect(msp); cols=[c for c in cc.columns_list(plan) if not c[1].startswith("CORE")]
+    if not th: return {(round(c[2]),round(c[3])): ceil_ssl-0.22 for c in cols}
+    cbox=takeoff.plan_bbox(titles,th[0][0],th[0][1]); cx0,cx1,cy0,cy1=cbox
+    drops=[]
+    for e in msp.query("TEXT MTEXT"):
+        if e.dxf.layer!="S-TEXT": continue
+        t=" ".join((e.plain_text() if e.dxftype()=="MTEXT" else e.dxf.text).split())
+        if re.fullmatch(r"3[25]0|400", t) and cx0<=e.dxf.insert.x<=cx1 and cy0<=e.dxf.insert.y<=cy1:
+            drops.append((e.dxf.insert.x,e.dxf.insert.y,int(t)))
+    beams,_,_=br.extract_beams(msp,cbox)
+    colx=[c[2] for c in cols]; coly=[c[3] for c in cols]
+    dxs=[d[0] for d in drops]+[b['cx'] for b in beams]; dys=[d[1] for d in drops]+[b['cy'] for b in beams]
+    if not dxs: return {(round(c[2]),round(c[3])): ceil_ssl-0.22 for c in cols}
+    ccx=(min(colx)+max(colx))/2; ccy=(min(coly)+max(coly))/2
+    dcx=(min(dxs)+max(dxs))/2; dcy=(min(dys)+max(dys))/2
+    sx=(max(dxs)-min(dxs))/(max(colx)-min(colx)); sy=(max(dys)-min(dys))/(max(coly)-min(coly))
+    def toC(x,y): return (dcx+(x-ccx)*sx, dcy+(y-ccy)*sy)
+    out={}
+    for sn,m,x,y in cols:
+        tx2,ty2=toC(x,y)
+        dd=min(((math.hypot(d[0]-tx2,d[1]-ty2),d[2]) for d in drops), default=(9e9,0))
+        best_bd=9e9; beamD=None
+        for b in beams:
+            if b.get('orient')=='H' and b['lo']-500<=tx2<=b['hi']+500: pd=abs(ty2-b['pos'])
+            elif b.get('orient')=='V' and b['lo']-500<=ty2<=b['hi']+500: pd=abs(tx2-b['pos'])
+            else: pd=9e9
+            if pd<best_bd: best_bd=pd; beamD=b['D']
+        if dd[0]<1600: end=ceil_ssl-(0.32 if dd[1]==320 else (0.35 if dd[1]==350 else 0.40))
+        elif best_bd<400 and beamD: end=ceil_ssl-beamD/1000.0
+        else: end=ceil_ssl-0.22
+        out[(round(x),round(y))]=round(end,3)
+    return out
+
 if __name__=="__main__":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     doc=ezdxf.readfile(cc.DEFAULT_DXF); msp=doc.modelspace()
     column_bases(msp, verbose=True)
+    ends=column_ends(msp); import collections as _c
+    print("توزيع منسوب النهاية:", dict(sorted(_c.Counter(ends.values()).items())))
