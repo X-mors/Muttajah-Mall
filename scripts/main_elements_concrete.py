@@ -21,6 +21,8 @@ CEIL_SSL   = -3.85     # سقف البدروم السفلي (لِفت 1)
 SLAB       = 0.22      # سماكة البلاطة → قاع السقف
 BASE_WALL  = -6.75     # ظهر الجدار الشمالي (مارك C)
 BASE_RAFT  = -8.45     # وش اللبشة (باقي الأعمدة)
+RAMP_THK   = 0.16      # سماكة الرمب — تُخصم من ارتفاع أعمدة زون الرمب (تخترق الرمب)
+RAMP_EDGE  = 4500      # زون الرمب: الأعمدة ضمن هذه المسافة من حافة المسقط يسار/يمين (RAMP04/03)
 WASTE      = 1.05
 
 def main():
@@ -39,20 +41,24 @@ def main():
 
     # ترتيب الأعمدة (أعلى→أسفل ثم يسار→يمين) وترقيمها
     colcols=[c for c in cols if not c[1].startswith("CORE")]
+    xs=[c[2] for c in colcols]; xmin,xmax=min(xs),max(xs)
     colcols.sort(key=lambda c:(-c[3], c[2]))
-    rows=[]; grand=0.0
+    rows=[]; grand=0.0; n_ramp=0
     per_mark=collections.defaultdict(lambda: dict(n=0, v=0.0))
     for i,(sn,m,x,y) in enumerate(colcols,1):
         wh=stages_by_mark.get(m,[None])[0] if m in stages_by_mark else None
-        base = BASE_WALL if m=="C" else BASE_RAFT
-        h = round(soffit - base, 3)
+        wall = (m=="C")
+        base = BASE_WALL if wall else BASE_RAFT
+        # زون الرمب: الأعمدة عند حافة المسقط (يسار RAMP04 / يمين RAMP03) غير أعمدة الجدار → تخترق الرمب
+        ramp = (not wall) and (x < xmin+RAMP_EDGE or x > xmax-RAMP_EDGE)
+        h = round(soffit - base - (RAMP_THK if ramp else 0.0), 3)
+        if ramp: n_ramp+=1
         if wh:
             W,D=wh[0]/1000.0, wh[1]/1000.0; v=W*D*h
         else:
             W=D=0; v=0
-        wall = (m=="C")
         rows.append(dict(no=i, mark=m, sec=(f"{wh[0]}×{wh[1]}" if wh else "—"),
-                         base=base, h=h, W=W, D=D, v=v, wall=wall, x=x, y=y))
+                         base=base, h=h, W=W, D=D, v=v, wall=wall, ramp=ramp, x=x, y=y))
         grand+=v; per_mark[m]["n"]+=1; per_mark[m]["v"]+=v
     cores=sorted([m for m in counts if m.startswith("CORE")])
 
@@ -62,7 +68,8 @@ def main():
     for m in sorted(per_mark, key=ct.mark_key):
         hh = soffit-(BASE_WALL if m=="C" else BASE_RAFT)
         print(f"{m:6}{per_mark[m]['n']:<5}{hh:<8.2f}{per_mark[m]['v']:<9.1f}")
-    print(f"\nإجمالي خرسانة الأعمدة (لِفت 1) = {grand:.1f} م³ | +هدر = {grand*WASTE:.1f} م³  | عدد الأعمدة {len(rows)}")
+    print(f"\nأعمدة الرمب (خُصم منها 16سم): {n_ramp}")
+    print(f"إجمالي خرسانة الأعمدة (لِفت 1) = {grand:.1f} م³ | +هدر = {grand*WASTE:.1f} م³  | عدد الأعمدة {len(rows)}")
     print(f"الأكوار: {cores}")
 
     # Excel
@@ -79,8 +86,8 @@ def main():
     for j,h in enumerate(["#","الماركة","المقطع (مم)","ظهر القاعدة","الارتفاع م","الحجم م³","نوع القاعدة","ملاحظة"],1): st(ws.cell(3,j,h),b=True,fill=NAVY,color="FFFFFF")
     r=4
     for d in rows:
-        note = "جدار شمالي W1" if d["wall"] else ""
-        fill = PUR if d["wall"] else None
+        note = "جدار شمالي W1" if d["wall"] else ("رمب: خصم 16سم" if d["ramp"] else "")
+        fill = PUR if d["wall"] else (YEL if d["ramp"] else None)
         st(ws.cell(r,1,d["no"]),fill=fill); st(ws.cell(r,2,d["mark"]),b=True,fill=fill or LT)
         st(ws.cell(r,3,d["sec"])); st(ws.cell(r,4,f"{d['base']:+.2f}")); st(ws.cell(r,5,d["h"]))
         st(ws.cell(r,6,round(d["v"],3))); st(ws.cell(r,7,"ظهر الجدار" if d["wall"] else "وش اللبشة"),fill=fill)
