@@ -82,6 +82,32 @@ def main():
     print(f"إجمالي خرسانة الأعمدة (لِفت 1) = {grand:.1f} م³ | +هدر = {grand*WASTE:.1f} م³  | عدد الأعمدة {len(rows)}")
     print(f"الأكوار: {cores}")
 
+    # ===== الحوائط المحيطة + بادئ الرمب =====
+    fx=(max(c[2] for c in colcols)-min(c[2] for c in colcols))/1000.0
+    fy=(max(c[3] for c in colcols)-min(c[3] for c in colcols))/1000.0
+    Hw = round(soffit - BASE_RAFT, 2)
+    walls=[("W1 شمالي (ظاهر 1.70م)", fx, 1.70, WALL_THK, fx*1.70*WALL_THK),
+           ("W4 جنوبي (حتى السقف)",  fx, Hw, WALL_THK, fx*Hw*WALL_THK),
+           ("W4 غربي (حتى السقف)",   fy, Hw, WALL_THK, fy*Hw*WALL_THK),
+           ("W4 شرقي (حتى السقف)",   fy, Hw, WALL_THK, fy*Hw*WALL_THK)]
+    v_walls=sum(w[4] for w in walls)
+    try:
+        import beams_rebar as br, takeoff as _tk
+        tt=_tk.all_titles(msp); rt=[x for x in tt if "RAMPS REINFORCEMENT PLAN FOR LOWER" in x[2].upper()][0]
+        rstr=br.measure_ramps(msp, _tk.plan_bbox(tt, rt[0], rt[1]))
+        if not rstr: raise ValueError
+    except Exception:
+        rstr=[("RAMP03",4.2,26.3,110.5),("RAMP04",3.9,25.0,97.5)]
+    starters=[(nm, w, STARTER_THK, STARTER_H, w*STARTER_THK*STARTER_H) for nm,w,h,a in rstr]
+    v_starter=sum(s[4] for s in starters)
+    # الأكوار (مساحة مقطع من بلوك ST_WAll) + الخزان (بلوك TANK_DETAILS)
+    CORE_AREA={"CORE1":0.89, "CORE2":2.51, "CORE3":0.99}
+    Hc = round(soffit - BASE_RAFT, 2); core_rows=[]; v_cores=0.0
+    for c in sorted(cores):
+        a=CORE_AREA.get(c,0); v=counts[c]*a*Hc; core_rows.append((c, counts[c], a, Hc, v)); v_cores+=v
+    TANK_WALL_FOOT=10.1; TANK_AREA=53.1; TANK_SHARED=0.89; Ht=Hc
+    v_tank_walls=(TANK_WALL_FOOT-TANK_SHARED)*Ht; v_tank_base=TANK_AREA*0.35; v_tank=v_tank_walls+v_tank_base
+
     # Excel
     NAVY,BLUE,LT,GREY,GRN,YEL,PUR="1F3864","2E5496","D9E1F2","F2F2F2","E2EFDA","FFF2CC","E6D5F2"
     thin=Side(style="thin",color="BFBFBF"); bd=Border(thin,thin,thin,thin)
@@ -123,39 +149,21 @@ def main():
         st(ws1.cell(rr,5,hrange)); st(ws1.cell(rr,6,round(per_mark[m]["v"],2))); rr+=1
     for j,w in enumerate([10,6,12,16,15,13],1): ws1.column_dimensions[get_column_letter(j)].width=w
 
-    # الأكوار
-    ws2=wb.create_sheet("الأكوار"); ws2.sheet_view.rightToLeft=True
-    ws2.merge_cells("A1:E1"); st(ws2["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws2["A1"]="الأكوار (سلالم/أسانسير) CORE"
-    for j,h in enumerate(["الكور","العدد","مساحة المقطع م²","ارتفاع م","حجم م³"],1): st(ws2.cell(2,j,h),b=True,fill=NAVY,color="FFFFFF")
-    rr=3
-    for c in cores:
-        st(ws2.cell(rr,1,c),b=True,fill=LT); st(ws2.cell(rr,2,counts[c])); st(ws2.cell(rr,3,"؟ (مساحة مقطع الجدران — تُستخرَج)"),fill=YEL,ha="right"); st(ws2.cell(rr,4,round(soffit-BASE_RAFT,2))); st(ws2.cell(rr,5,"؟"),fill=YEL); rr+=1
-    for j,w in enumerate([10,6,28,10,10],1): ws2.column_dimensions[get_column_letter(j)].width=w
+    # الأكوار (محسوبة — مساحة المقطع من بلوك ST_WAll، الارتفاع حتى السقف)
+    ws2=wb.create_sheet("الأكوار والخزان"); ws2.sheet_view.rightToLeft=True
+    ws2.merge_cells("A1:E1"); st(ws2["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws2["A1"]="الأكوار (سلالم/أسانسير) + الخزان"
+    ws2.merge_cells("A2:E2"); st(ws2.cell(2,1,f"مساحة مقطع جدران الأكوار من بلوك ST_WAll (سماكة 300مم)؛ الارتفاع حتى قاع السقف ({Hc}م). المسقط: K1=K2=CORE3، K3=CORE2، T2=CORE1."),sz=9,fill=GRN,ha="right",wrap=True); ws2.row_dimensions[2].height=28
+    for j,h in enumerate(["الكور","العدد","مساحة المقطع م²","ارتفاع م","حجم م³"],1): st(ws2.cell(3,j,h),b=True,fill=NAVY,color="FFFFFF")
+    rr=4
+    for c,n,a,H,V in core_rows:
+        st(ws2.cell(rr,1,c),b=True,fill=LT); st(ws2.cell(rr,2,n)); st(ws2.cell(rr,3,a)); st(ws2.cell(rr,4,H)); st(ws2.cell(rr,5,round(V,2))); rr+=1
+    st(ws2.cell(rr,1,"مجموع الأكوار"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_cores,2)),b=True,fill=GRN); rr+=2
+    st(ws2.cell(rr,1,"الخزان T1 (9.7×5.5م، سماكة 350مم، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
+    st(ws2.cell(rr,1,"جدران الخزان (ناقص المشترك)"),fill=LT,ha="right"); st(ws2.cell(rr,2,f"{TANK_WALL_FOOT}−{TANK_SHARED} م²")); st(ws2.cell(rr,4,Ht)); st(ws2.cell(rr,5,round(v_tank_walls,2))); rr+=1
+    st(ws2.cell(rr,1,"أرضية الخزان"),fill=LT,ha="right"); st(ws2.cell(rr,2,f"{TANK_AREA}م² × 0.35")); st(ws2.cell(rr,5,round(v_tank_base,2))); rr+=1
+    st(ws2.cell(rr,1,"مجموع الخزان (بدون الغطاء=السقف)"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_tank,2)),b=True,fill=GRN); rr+=1
+    for j,w in enumerate([30,14,12,9,10],1): ws2.column_dimensions[get_column_letter(j)].width=w
 
-    # ===== الحوائط المحيطة + بادئ الرمب (محسوبة بأبعاد اللوحة + سماكات مفترضة) =====
-    fx=(max(c[2] for c in colcols)-min(c[2] for c in colcols))/1000.0   # عرض المبنى (شمال/جنوب)
-    fy=(max(c[3] for c in colcols)-min(c[3] for c in colcols))/1000.0   # عمق المبنى (شرق/غرب)
-    Hw = round(soffit - BASE_RAFT, 2)                                   # ارتفاع الحائط الكامل (لبشة→قاع السقف)
-    walls=[
-        ("W1 شمالي (ظاهر 1.70م)", fx, 1.70, WALL_THK, fx*1.70*WALL_THK),
-        ("W4 جنوبي (حتى السقف)",  fx, Hw,   WALL_THK, fx*Hw*WALL_THK),
-        ("W4 غربي (حتى السقف)",   fy, Hw,   WALL_THK, fy*Hw*WALL_THK),
-        ("W4 شرقي (حتى السقف)",   fy, Hw,   WALL_THK, fy*Hw*WALL_THK),
-    ]
-    v_walls=sum(w[4] for w in walls)
-    # بادئ الرمب: طوله = عرض الرمب، × سماكة × ارتفاع (مفترضان من السيكشن)
-    try:
-        import beams_rebar as br, takeoff as _tk
-        tt=_tk.all_titles(msp)
-        rt=[x for x in tt if "RAMPS REINFORCEMENT PLAN FOR LOWER" in x[2].upper()][0]
-        rstr=br.measure_ramps(msp, _tk.plan_bbox(tt, rt[0], rt[1]))
-        if not rstr: raise ValueError
-    except Exception:
-        rstr=[("RAMP03",4.2,26.3,110.5),("RAMP04",3.9,25.0,97.5)]
-    starters=[(nm, w, STARTER_THK, STARTER_H, w*STARTER_THK*STARTER_H) for nm,w,h,a in rstr]
-    v_starter=sum(s[4] for s in starters)
-
-    # الأكوار (مساحة مقطع غير مُستخرَجة بثقة) + الخزان (غير مرسوم) → مُعلَّقان
     ws3=wb.create_sheet("الحوائط وبادئ الرمب"); ws3.sheet_view.rightToLeft=True
     ws3.merge_cells("A1:E1"); st(ws3["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws3["A1"]="الحوائط المحيطة + بادئ الرمب"
     ws3.merge_cells("A2:E2"); st(ws3.cell(2,1,f"الأطوال من أبعاد المبنى ({fx:.1f}×{fy:.1f}م). W1 ظاهر 1.70م (بلوك rwall 2m)، W4 حتى قاع السقف (ارتفاع {Hw}م، بلوك R.WALL_DETAILS). السماكة {WALL_THK}م مُستخرَجة من البلوكات."),sz=9,fill=GRN,ha="right",wrap=True); ws3.row_dimensions[2].height=30
@@ -173,11 +181,11 @@ def main():
     # ===== الإجمالي =====
     ws5=wb.create_sheet("الإجمالي"); ws5.sheet_view.rightToLeft=True
     ws5.merge_cells("A1:C1"); st(ws5["A1"],b=True,sz=13,color="FFFFFF",fill=NAVY); ws5["A1"]="إجمالي خرسانة العناصر الرئيسية — لِفت 1"
-    items=[("الأعمدة (65)", round(grand,2), "مؤكّد (كل عمود من قاعدته)"),
-           ("الحوائط المحيطة (W1+W4)", round(v_walls,2), f"سماكة مفترضة {WALL_THK}م"),
-           ("بادئ الرمب", round(v_starter,3), f"سماكة/ارتفاع مفترضان"),
-           ("الأكوار (CORE1/2/3)", None, "مساحة المقطع غير مُستخرَجة — سؤال"),
-           ("الخزان T1", None, "غير مرسوم في الـDXF — سؤال")]
+    items=[("الأعمدة (65)", round(grand,2), "كل عمود من ظهر قاعدته حتى قاع السقف"),
+           ("الحوائط المحيطة (W1+W4)", round(v_walls,2), f"سماكة {WALL_THK}م مُستخرَجة"),
+           ("الأكوار (CORE1/2/3)", round(v_cores,2), f"مقطع من ST_WAll، ارتفاع {Hc}م حتى السقف"),
+           ("الخزان T1", round(v_tank,2), "9.7×5.5م سماكة 350مم − الجدار المشترك مع CORE1"),
+           ("بادئ الرمب", round(v_starter,3), "الطول=عرض الرمب")]
     for j,h in enumerate(["العنصر","الحجم م³","ملاحظة"],1): st(ws5.cell(2,j,h),b=True,fill=NAVY,color="FFFFFF")
     r5=3; tot=0.0
     for nm,v,nt in items:
@@ -203,8 +211,9 @@ def main():
         ws4.merge_cells(f"A{i}:H{i}"); st(ws4.cell(i,1,n),sz=10,ha="right",wrap=True,fill=YEL); ws4.row_dimensions[i].height=34
     ws4.column_dimensions["A"].width=120
 
-    print(f"\nالحوائط: {v_walls:.1f} م³ (سماكة {WALL_THK}م مفترضة) | بادئ الرمب: {v_starter:.2f} م³")
-    print(f"الإجمالي المحسوب (أعمدة+حوائط+بادئ رمب) = {grand+v_walls+v_starter:.1f} م³ | +هدر = {(grand+v_walls+v_starter)*WASTE:.1f} م³ (بدون أكوار/خزان)")
+    tot_all=grand+v_walls+v_cores+v_tank+v_starter
+    print(f"\nالحوائط {v_walls:.1f} | الأكوار {v_cores:.1f} | الخزان {v_tank:.1f} | بادئ الرمب {v_starter:.2f} م³")
+    print(f"الإجمالي الكلي (كل العناصر الرئيسية) = {tot_all:.1f} م³ | +هدر 5٪ = {tot_all*WASTE:.1f} م³")
 
     os.makedirs(args.outdir,exist_ok=True)
     out=os.path.join(args.outdir,"حصر خرسانة العناصر الرئيسية - لِفت 1.xlsx")
