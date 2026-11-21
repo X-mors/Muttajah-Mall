@@ -100,13 +100,17 @@ def main():
         rstr=[("RAMP03",4.2,26.3,110.5),("RAMP04",3.9,25.0,97.5)]
     starters=[(nm, w, STARTER_THK, STARTER_H, w*STARTER_THK*STARTER_H) for nm,w,h,a in rstr]
     v_starter=sum(s[4] for s in starters)
-    # الأكوار (مساحة مقطع من بلوك ST_WAll) + الخزان (بلوك TANK_DETAILS)
-    CORE_AREA={"CORE1":0.89, "CORE2":2.51, "CORE3":0.99}
-    Hc = round(soffit - BASE_RAFT, 2); core_rows=[]; v_cores=0.0
-    for c in sorted(cores):
-        a=CORE_AREA.get(c,0); v=counts[c]*a*Hc; core_rows.append((c, counts[c], a, Hc, v)); v_cores+=v
-    TANK_WALL_FOOT=10.1; TANK_AREA=53.1; TANK_SHARED=0.89; Ht=Hc
-    v_tank_walls=(TANK_WALL_FOOT-TANK_SHARED)*Ht; v_tank_base=TANK_AREA*0.35; v_tank=v_tank_walls+v_tank_base
+    # الأكوار والخزان على قواعد 1100مم (وش ‑7.75) → الارتفاع حتى قاع السقف = 3.68م
+    # مساحات المقطع من تهشير الكور على لوحة COLUMNS&AXES (حوائط 300مم) — مطابقة لحصر الـproject.
+    CORE_BASE=-7.75
+    Hc = round(soffit - CORE_BASE, 2)                       # 3.68
+    CORE_AREA={"CORE2":2.55, "CORE3":6.00}                  # م² (CORE3 صندوق 4.0×7.2م؛ CORE2 شكل U 2.9×3.1م). CORE1 مع الخزان.
+    core_rows=[]; v_cores=0.0
+    for c in sorted([x for x in cores if x in CORE_AREA]):
+        a=CORE_AREA[c]; v=counts[c]*a*Hc; core_rows.append((c, counts[c], a, Hc, v)); v_cores+=v
+    # الخزان: حوائط L (16.63) + ضلعا CORE1 (1.35) + العمود الفاصل C3 (0.65) × الارتفاع
+    TANK_T1=16.63; TANK_T2=1.35; TANK_T3=0.65; Ht=Hc; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
+    v_tank=TANK_AREA*Ht
 
     # Excel
     NAVY,BLUE,LT,GREY,GRN,YEL,PUR="1F3864","2E5496","D9E1F2","F2F2F2","E2EFDA","FFF2CC","E6D5F2"
@@ -158,10 +162,10 @@ def main():
     for c,n,a,H,V in core_rows:
         st(ws2.cell(rr,1,c),b=True,fill=LT); st(ws2.cell(rr,2,n)); st(ws2.cell(rr,3,a)); st(ws2.cell(rr,4,H)); st(ws2.cell(rr,5,round(V,2))); rr+=1
     st(ws2.cell(rr,1,"مجموع الأكوار"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_cores,2)),b=True,fill=GRN); rr+=2
-    st(ws2.cell(rr,1,"الخزان T1 (9.7×5.5م، سماكة 350مم، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
-    st(ws2.cell(rr,1,"جدران الخزان (ناقص المشترك)"),fill=LT,ha="right"); st(ws2.cell(rr,2,f"{TANK_WALL_FOOT}−{TANK_SHARED} م²")); st(ws2.cell(rr,4,Ht)); st(ws2.cell(rr,5,round(v_tank_walls,2))); rr+=1
-    st(ws2.cell(rr,1,"أرضية الخزان"),fill=LT,ha="right"); st(ws2.cell(rr,2,f"{TANK_AREA}م² × 0.35")); st(ws2.cell(rr,5,round(v_tank_base,2))); rr+=1
-    st(ws2.cell(rr,1,"مجموع الخزان (بدون الغطاء=السقف)"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_tank,2)),b=True,fill=GRN); rr+=1
+    st(ws2.cell(rr,1,"الخزان T1 (L‑shape 10.51×9.70م، سماكة 350مم، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
+    for lbl,ar in [("حوائط الخزان T1", TANK_T1), ("ضلعا CORE1 (T2)", TANK_T2), ("العمود الفاصل C3 (T3)", TANK_T3)]:
+        st(ws2.cell(rr,1,lbl),fill=LT,ha="right"); st(ws2.cell(rr,3,ar)); st(ws2.cell(rr,4,Ht)); st(ws2.cell(rr,5,round(ar*Ht,2))); rr+=1
+    st(ws2.cell(rr,1,"مجموع الخزان"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_tank,2)),b=True,fill=GRN); rr+=1
     for j,w in enumerate([30,14,12,9,10],1): ws2.column_dimensions[get_column_letter(j)].width=w
 
     ws3=wb.create_sheet("الحوائط وبادئ الرمب"); ws3.sheet_view.rightToLeft=True
