@@ -124,15 +124,16 @@ def main():
     # مساحات المقطع من تهشير الكور على لوحة COLUMNS&AXES (حوائط 300مم) — مطابقة لحصر الـproject.
     CORE_BASE=-7.75
     Hc = round(soffit - CORE_BASE, 2)                       # 3.68
-    CORE_AREA={"CORE2":2.55, "CORE3":6.00}                  # م² (CORE3 صندوق 4.0×7.2م؛ CORE2 شكل U 2.9×3.1م). CORE1 مع الخزان.
+    CORE_AREA={"CORE2":2.55, "CORE3":6.36}                  # م² مقطع إجمالي (CORE3 صندوق سلالم؛ CORE2 شكل U أسانسير). CORE1 مع الخزان.
+    CORE_DOOR={"CORE3":round(0.36*2.30,3)}                   # خصم باب كور السلالم: 1.20×0.30م² × ارتفاع 2.30م = 0.828م³ (لا فتحة كامل الارتفاع)
     CORE_LABEL={"CORE3":"CORE3 — كور سلالم","CORE2":"CORE2 — كور أسانسير"}
     # كل كور يُحصَر بعدد تكراره في المسقط (CORE3 مكرّر = K1+K2 → مرتين، لا نموذج واحد)
     core_rows=[]; v_cores=0.0
     for c in sorted([x for x in cores if x in CORE_AREA]):
-        a=CORE_AREA[c]; n=counts[c]
+        a=CORE_AREA[c]; n=counts[c]; door=CORE_DOOR.get(c,0.0)
         for k in range(1,n+1):
             tag=f"{CORE_LABEL.get(c,c)}" + (f" (نسخة {k}/{n})" if n>1 else "")
-            v=a*Hc; core_rows.append((tag, 1, a, Hc, v)); v_cores+=v
+            v=a*Hc - door; core_rows.append((tag, 1, a, Hc, v)); v_cores+=v
     # الخزان: حوائط L (16.63) + ضلعا CORE1 (1.35) + العمود الفاصل C3 (0.65) × الارتفاع
     # الارتفاع = من المناسيب ‑7.75 حتى ‑4.07 = 3.68م (بُعد 3700 بالمسقط ليس ارتفاعاً).
     Ht=Hc   # 3.68م

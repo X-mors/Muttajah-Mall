@@ -34,7 +34,7 @@ def build(msp):
     for nm,L,b,t in seg: wv[nm]=wv.get(nm,0)+L*T*(t-b)
     walls=[(k,round(v,1)) for k,v in wv.items()]
     walls_ex=sum(v for _,v in wv.items())
-    cores_ex=53.54; tank_ex=68.57; start_ex=2.07
+    cores_ex=54.52; tank_ex=68.57; start_ex=2.07   # الأكوار: مقطع 6.36 − باب 0.83 لكل كور سلالم
     v_cols=round(cols_ex,1); v_walls=round(walls_ex,1); v_cores=round(cores_ex,1); v_tank=round(tank_ex,1); v_start=start_ex
     total=round(cols_ex+walls_ex+cores_ex+tank_ex+start_ex,1)
     return rows,cores,(x0,x1,y0,y1),dict(cols=v_cols,walls=walls,v_walls=v_walls,

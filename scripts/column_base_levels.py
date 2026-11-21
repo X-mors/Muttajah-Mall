@@ -15,7 +15,8 @@ import sys, math, collections
 import ezdxf, takeoff, raft_footings as rf, columns_takeoff as ct, concrete_columns_takeoff as cc
 
 MAT_TOP   = -8.45     # وش المات العام (أوطى جزء)
-WALL_TOP  = -6.75     # ظهر الجدار الشمالي (مارك C)
+WALL_TOP  = -8.45     # قاعدة أعمدة الجدار الشمالي (مارك C): العمود الخرساني ينزل للمات ‑8.45
+                      # (الجدار الظاهر 1.70م = حائط W1 بين الأعمدة، يُحصَر منفصلاً). مطابق للـproject.
 WALL_MARK = "C"
 
 def _poly_of(f):
@@ -159,13 +160,10 @@ def ramp_column_ends(msp):
         gcx=sum(c[1] for c in group)/len(group)
         cand=[(sx+dxv, sy+dyv) for sx,sy in starters]
         return min(cand, key=lambda p: abs(p[0]-gcx))   # البادئ الأقرب لعنقود المجموعة بالـx
-    # ميل الرمب من اللوحة (A-SYMB '7.50%' في سيكشن الرمب) — لا يُفترض
-    slope=0.075
-    for sx,sy,t in _ramp_text_pts(msp,r"\d+\.\d+\s*%"):
-        mm=re.search(r"(\d+\.\d+)\s*%", t)
-        if mm and -445000<=sx<=-410000: slope=float(mm.group(1))/100.0; break
-    soffit_bottom=round(RAMP_FFL-RAMP_THK_S,2)   # ‑7.41 (قاع بلاطة الرمب عند أرضية ‑7.25)
-    soffit_top=round(RAMP_SSL-RAMP_THK_S,2)      # ‑4.01 (عند قمة الرمب)
+    # قاع بلاطة الرمب: من ‑7.41 عند البادئ (أرضية ‑7.25) إلى ‑5.23 عند أبعد عمود واقف (قراءة الـproject،
+    # متوسط ميل ~9.4% لأن النص 15% والطرفان 7.5%). الاتجاه يُعيَّر من البادئ (العمود الأقرب = قاع الرمب).
+    soffit_bottom=round(RAMP_FFL-RAMP_THK_S,2)   # ‑7.41
+    RAMP_FAR=-5.23
     out={}
     for group in (left, right):
         if not group: continue
@@ -173,10 +171,10 @@ def ramp_column_ends(msp):
         if st is None:   # fallback: البادئ شمال (أعلى y)
             st=(sum(c[1] for c in group)/len(group), max(c[2] for c in group)+1)
         dists=[(c, math.hypot(c[1]-st[0], c[2]-st[1])) for c in group]
-        dmin=min(d for _,d in dists)
+        dmin=min(d for _,d in dists); dmax=max(d for _,d in dists)
         for (m,x,y),d in dists:
-            # قاع الرمب يرتفع بالميل كل ما ابتعدنا عن البادئ؛ العمود الأقرب ≈ قاع الرمب
-            end=round(min(soffit_bottom+(d-dmin)/1000.0*slope, soffit_top),3)
+            frac=(d-dmin)/(dmax-dmin) if dmax>dmin else 0.0
+            end=round(soffit_bottom+frac*(RAMP_FAR-soffit_bottom),3)
             out[(round(x),round(y))]=end
     return out
 
@@ -188,7 +186,11 @@ def column_ends(msp, ceil_ssl=-3.85):
     import takeoff, beams_rebar as br, re, math
     titles=takeoff.all_titles(msp)
     th=takeoff.find_title(titles,"LOWER BASEMENT CEILING","TOP")
-    plan,_=ct.collect(msp); cols=[c for c in cc.columns_list(plan) if not c[1].startswith("CORE")]
+    plan,sched=ct.collect(msp); cols=[c for c in cc.columns_list(plan) if not c[1].startswith("CORE")]
+    stages,_=cc.parse_schedule_stages(sched)   # مقطع كل ماركة → للبحث بمستطيل العمود الحقيقي
+    def half_mm(m):
+        wh=stages.get(m,[None])[0] if m in stages else None
+        return (max(wh)/2.0 if wh else 300.0)   # نصف أكبر بُعد للعمود (mm)
     if not th: return {(round(c[2]),round(c[3])): ceil_ssl-0.22 for c in cols}
     cbox=takeoff.plan_bbox(titles,th[0][0],th[0][1]); cx0,cx1,cy0,cy1=cbox
     drops=[]
@@ -208,16 +210,27 @@ def column_ends(msp, ceil_ssl=-3.85):
     out={}
     for sn,m,x,y in cols:
         tx2,ty2=toC(x,y)
+        hw=half_mm(m)                       # نصف أكبر بُعد للعمود (mm)
+        # هابط فوق العمود (نطاق يغطّي مستطيل العمود؛ ليبل العمود قد يبعد عن المركز)
         dd=min(((math.hypot(d[0]-tx2,d[1]-ty2),d[2]) for d in drops), default=(9e9,0))
-        best_bd=9e9; beamD=None
+        drop_dep=(0.32 if dd[1]==320 else (0.35 if dd[1]==350 else 0.40)) if dd[0] < 1600 else 0.0
+        # كمرة تلامس مستطيل العمود: المسافة العمودية < نصف بُعد العمود + هامش
+        beam_dep=0.0; beam_w=250.0
         for b in beams:
             if b.get('orient')=='H' and b['lo']-500<=tx2<=b['hi']+500: pd=abs(ty2-b['pos'])
             elif b.get('orient')=='V' and b['lo']-500<=ty2<=b['hi']+500: pd=abs(tx2-b['pos'])
-            else: pd=9e9
-            if pd<best_bd: best_bd=pd; beamD=b['D']
-        if dd[0]<1600: end=ceil_ssl-(0.32 if dd[1]==320 else (0.35 if dd[1]==350 else 0.40))
-        elif best_bd<400 and beamD: end=ceil_ssl-beamD/1000.0
-        else: end=ceil_ssl-0.22
+            else: continue
+            if pd < hw + 150 and b['D']/1000.0 > beam_dep:   # نصف بُعد العمود بدل 400 ثابتة
+                beam_dep=b['D']/1000.0; beam_w=b.get('W',250)
+        # نهاية العمود = قاع أوطى عنصر فوقه (بلاطة 0.22 / هابط / كمرة)؛ الهابط له الأولوية إن وُجد
+        if drop_dep:
+            end=ceil_ssl - drop_dep
+        elif beam_dep:
+            # الكمرة تاخد جزءاً من العمود فقط (عرض الكمرة/أكبر بُعد للعمود)؛ الباقي يكمل لقاع البلاطة
+            frac=min(1.0, beam_w/(2.0*hw))
+            end=frac*(ceil_ssl-beam_dep) + (1.0-frac)*(ceil_ssl-0.22)
+        else:
+            end=ceil_ssl - 0.22
         out[(round(x),round(y))]=round(end,3)
     # أعمدة الرمب المتوقّفة: تُستبدَل نهايتها بقاع بلاطة الرمب على الميل (أوطى من السقف)
     out.update(ramp_column_ends(msp))
