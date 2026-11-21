@@ -46,6 +46,20 @@ def footing_polys(msp):
 
 HEAVY_MARKS = ("C3","C6","C7","C8","C9","C10")   # مقاطع كبيرة → يجب أن تقع داخل قواعد مُثخّنة
 
+def drop_tank_c3(colcols, all_cols):
+    """يشيل عمود C3 الواقع داخل الخزان (العمود/الجدار الفاصل T3، محسوب ضمن حوائط الخزان 0.65م²)
+    حتى لا يُحصَر مرتين. يُحدَّد كأقرب C3 لمركز CORE1 (الخزان ملاصق له) ضمن 7م."""
+    import math
+    core1=[(x,y) for sn,m,x,y in all_cols if m=="CORE1"]
+    if not core1: return colcols
+    cx,cy=core1[0]
+    c3=[c for c in colcols if c[1]=="C3"]
+    if not c3: return colcols
+    nearest=min(c3, key=lambda c: math.hypot(c[2]-cx, c[3]-cy))
+    if math.hypot(nearest[2]-cx, nearest[3]-cy) < 7000:
+        return [c for c in colcols if c is not nearest]
+    return colcols
+
 def _align_footings(cols, foot):
     """إزاحة (dx,dy) تحوّل إحداثي العمود إلى إطار اللبشة بمطابقة مراكز القواعد على الأعمدة.
     لوحة القواعد تغطّي النطاق الأوسط فقط، فمحاذاة مركز‑الـbbox تنحرف؛ بدلاً منها نصوّت على

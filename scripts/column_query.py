@@ -25,7 +25,9 @@ def compute(msp):
     plan,sched=ct.collect(msp); stages,_=cc.parse_schedule_stages(sched)
     bl=cbl.column_bases(msp); base_map={(round(o["x"]),round(o["y"])):(o["base"],o["zone"]) for o in bl}
     ends=cbl.column_ends(msp, ceil_ssl=CEIL); rs=cbl.ramp_column_ends(msp)
-    cols=[c for c in cc.columns_list(plan) if not c[1].startswith("CORE")]
+    allc=cc.columns_list(plan)
+    cols=[c for c in allc if not c[1].startswith("CORE")]
+    cols=cbl.drop_tank_c3(cols, allc)          # C3 داخل الخزان محسوب في الخزان — يُشال من الأعمدة
     cols.sort(key=lambda c:(-c[3], c[2]))
     rows=[]
     for i,(sn,m,x,y) in enumerate(cols,1):

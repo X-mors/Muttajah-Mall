@@ -52,6 +52,7 @@ def main():
 
     # ترتيب الأعمدة (أعلى→أسفل ثم يسار→يمين) وترقيمها
     colcols=[c for c in cols if not c[1].startswith("CORE")]
+    colcols=cbl.drop_tank_c3(colcols, cols)   # C3 داخل الخزان محسوب في الخزان (T3) — يُشال من الأعمدة
     xs=[c[2] for c in colcols]; xmin,xmax=min(xs),max(xs)
     colcols.sort(key=lambda c:(-c[3], c[2]))
     rows=[]; grand=0.0; n_ramp=0
@@ -90,13 +91,19 @@ def main():
     print(f"الأكوار: {cores}")
 
     # ===== الحوائط المحيطة + بادئ الرمب =====
-    fx=(max(c[2] for c in colcols)-min(c[2] for c in colcols))/1000.0
-    fy=(max(c[3] for c in colcols)-min(c[3] for c in colcols))/1000.0
-    Hw = round(soffit - BASE_RAFT, 2)
-    walls=[("W1 شمالي (ظاهر 1.70م)", fx, 1.70, WALL_THK, fx*1.70*WALL_THK),
-           ("W4 جنوبي (حتى السقف)",  fx, Hw, WALL_THK, fx*Hw*WALL_THK),
-           ("W4 غربي (حتى السقف)",   fy, Hw, WALL_THK, fy*Hw*WALL_THK),
-           ("W4 شرقي (حتى السقف)",   fy, Hw, WALL_THK, fy*Hw*WALL_THK)]
+    # الأطوال من الجدران المرسومة نفسها (ليس من بُعد أبعد عمودين)، وقاعدة كل جزء من اللبشة تحته.
+    # W4 الشرقي مقسوم 5 أجزاء: جزءان (6م) على قواعد 700 يبدآن من ‑8.15، الباقي من ‑8.45.
+    WALL_SEGS=[  # (اسم, طول م, منسوب القاعدة, منسوب القمة)
+        ("W1 شمالي (عليه أعمدة C)", 48.835, BASE_RAFT, BASE_WALL),    # ‑8.45 → ‑6.75 (ظاهر 1.70م)
+        ("W2 غربي (حتى السقف)",     45.000, BASE_RAFT, soffit),
+        ("W3 جنوبي (حتى السقف)",    53.335, BASE_RAFT, soffit),
+        ("W4‑1 شرقي",              14.100, BASE_RAFT, soffit),
+        ("W4‑2 شرقي (قاعدة 700)",   6.000, -8.15,     soffit),
+        ("W4‑3 شرقي",               4.850, BASE_RAFT, soffit),
+        ("W4‑4 شرقي (قاعدة 700)",   6.000, -8.15,     soffit),
+        ("W4‑5 شرقي",              14.050, BASE_RAFT, soffit),
+    ]
+    walls=[(nm, L, round(top-base,2), WALL_THK, L*WALL_THK*(top-base)) for nm,L,base,top in WALL_SEGS]
     v_walls=sum(w[4] for w in walls)
     try:
         import beams_rebar as br, takeoff as _tk
@@ -105,23 +112,13 @@ def main():
         if not rstr: raise ValueError
     except Exception:
         rstr=[("RAMP03",4.2,26.3,110.5),("RAMP04",3.9,25.0,97.5)]
-    # بادئ الرمب = الكمرة المقلوبة عند بدايته (مقطعها من اللوحة: 'INV. B2(250X700)' بجانب 'With ramp')
-    import re as _re
-    st_w, st_d = STARTER_THK, STARTER_H
-    try:
-        import takeoff as _tk2
-        tt2=_tk2.all_titles(msp); rt2=[x for x in tt2 if "RAMPS REINFORCEMENT PLAN FOR LOWER" in x[2].upper()][0]
-        bx=_tk2.plan_bbox(tt2, rt2[0], rt2[1]); rx0,rx1,ry0,ry1=bx
-    except Exception:
-        rx0,rx1,ry0,ry1=-9e9,9e9,-9e9,9e9
-    for e in msp.query("TEXT MTEXT"):
-        try: t=" ".join((e.plain_text() if e.dxftype()=="MTEXT" else e.dxf.text).split())
-        except: continue
-        x,y=e.dxf.insert.x,e.dxf.insert.y
-        mm=_re.search(r"INV\.?\s*B\d?\s*\(?\s*(\d{3})\s*[xX×]\s*(\d{3})", t, _re.I)
-        if mm and rx0<=x<=rx1 and ry0<=y<=ry1:
-            st_w, st_d = int(mm.group(1))/1000.0, int(mm.group(2))/1000.0; break
-    starters=[(nm, w, st_w, st_d, w*st_w*st_d) for nm,w,h,a in rstr]   # طول=عرض الرمب، مقطع الكمرة المقلوبة
+    # بادئ الرمب = حائط 250مم بعرض الرمب، من وش اللبشة ‑8.45 حتى قاع بلاطة الرمب عند البداية (من القطاع).
+    STARTER_SEGS=[  # (اسم, عرض الرمب م, منسوب القاعدة, قاع بلاطة الرمب عند البادئ)
+        ("بادئ RAMP04 (Ramp starter)", 3.90, BASE_RAFT, -7.351),
+        ("بادئ RAMP03 (Ramp starter)", 4.20, BASE_RAFT, -7.501),
+    ]
+    STARTER_THK2=0.25
+    starters=[(nm, L, STARTER_THK2, round(top-base,3), L*STARTER_THK2*(top-base)) for nm,L,base,top in STARTER_SEGS]
     v_starter=sum(s[4] for s in starters)
     # الأكوار والخزان على قواعد 1100مم (وش ‑7.75) → الارتفاع حتى قاع السقف = 3.68م
     # مساحات المقطع من تهشير الكور على لوحة COLUMNS&AXES (حوائط 300مم) — مطابقة لحصر الـproject.
@@ -137,8 +134,9 @@ def main():
             tag=f"{CORE_LABEL.get(c,c)}" + (f" (نسخة {k}/{n})" if n>1 else "")
             v=a*Hc; core_rows.append((tag, 1, a, Hc, v)); v_cores+=v
     # الخزان: حوائط L (16.63) + ضلعا CORE1 (1.35) + العمود الفاصل C3 (0.65) × الارتفاع
-    TANK_H=3.70   # ارتفاع الخزان من اللوحة (TANK SECTION، قياس رأسي 3700مم) — لا يُفترض
-    TANK_T1=16.63; TANK_T2=1.35; TANK_T3=0.65; Ht=TANK_H; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
+    # الارتفاع = من المناسيب ‑7.75 حتى ‑4.07 = 3.68م (بُعد 3700 بالمسقط ليس ارتفاعاً).
+    Ht=Hc   # 3.68م
+    TANK_T1=16.63; TANK_T2=1.35; TANK_T3=0.65; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
     v_tank=TANK_AREA*Ht
 
     # Excel
@@ -199,7 +197,7 @@ def main():
 
     ws3=wb.create_sheet("الحوائط وبادئ الرمب"); ws3.sheet_view.rightToLeft=True
     ws3.merge_cells("A1:E1"); st(ws3["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws3["A1"]="الحوائط المحيطة + بادئ الرمب"
-    ws3.merge_cells("A2:E2"); st(ws3.cell(2,1,f"الأطوال من أبعاد المبنى ({fx:.1f}×{fy:.1f}م). W1 ظاهر 1.70م (بلوك rwall 2m)، W4 حتى قاع السقف (ارتفاع {Hw}م، بلوك R.WALL_DETAILS). السماكة {WALL_THK}م مُستخرَجة من البلوكات."),sz=9,fill=GRN,ha="right",wrap=True); ws3.row_dimensions[2].height=30
+    ws3.merge_cells("A2:E2"); st(ws3.cell(2,1,f"الأطوال من الجدران المرسومة نفسها (W1 شمالي 48.84م ظاهر 1.70م حتى ‑6.75؛ W2 غربي 45م؛ W3 جنوبي 53.34م؛ W4 شرقي 5 أجزاء، جزءان على قواعد 700 من ‑8.15). السماكة {WALL_THK}م. البادئ = حائط 0.25م من ‑8.45 لقاع بلاطة الرمب."),sz=9,fill=GRN,ha="right",wrap=True); ws3.row_dimensions[2].height=44
     for j,h in enumerate(["العنصر","الطول م","الارتفاع م","السماكة م","الحجم م³"],1): st(ws3.cell(3,j,h),b=True,fill=NAVY,color="FFFFFF")
     r3=4
     for nm,L,H,T,V in walls:
