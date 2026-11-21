@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-حصر خرسانة العناصر الرئيسية الرأسية — Muttajah Mall (لِفت 1: اللبشة → سقف البدروم السفلي -3.85).
+حصر خرسانة العناصر الرأسية — Muttajah Mall (لِفت 1: اللبشة → سقف البدروم السفلي -3.85).
 كل عمود بارتفاعه حسب مكانه (من ظهر قاعدته حتى قاع السقف) — بدون توحيد:
   • القاعدة نفسها ليست ضمن حصر العمود (العمود يبدأ من ظهرها).
   • مارك C (9) = أعمدة الجدار الشمالي W1 → تبدأ من ظهر الجدار -6.75 (لبشة 40سم وش -8.45 + ظاهر 1.70).
   • باقي الأعمدة (C1..C10) → من وش اللبشة -8.45.
   • أعمدة الرمب: تُخصم سماكة الرمب (أو عمق الكمرة المقلوبة) — تُعلَّم (تحتاج قائمتها ومنسوب الرمب).
-  • الأكوار (CORE1/2/3) والخزان والحوائط = عناصر رئيسية (مقاطع/أبعاد تُدخَل/تُستخرَج).
+  • الأكوار (CORE1/2/3) والخزان والحوائط = عناصر رأسية (مقاطع/أبعاد تُدخَل/تُستخرَج).
 القاعدة: ارتفاع العمود = قاع السقف − ظهر القاعدة.  قاع السقف = السقف SSL − سماكة البلاطة.
 """
 import argparse, os, collections
@@ -137,7 +137,8 @@ def main():
             tag=f"{CORE_LABEL.get(c,c)}" + (f" (نسخة {k}/{n})" if n>1 else "")
             v=a*Hc; core_rows.append((tag, 1, a, Hc, v)); v_cores+=v
     # الخزان: حوائط L (16.63) + ضلعا CORE1 (1.35) + العمود الفاصل C3 (0.65) × الارتفاع
-    TANK_T1=16.63; TANK_T2=1.35; TANK_T3=0.65; Ht=Hc; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
+    TANK_H=3.70   # ارتفاع الخزان من اللوحة (TANK SECTION، قياس رأسي 3700مم) — لا يُفترض
+    TANK_T1=16.63; TANK_T2=1.35; TANK_T3=0.65; Ht=TANK_H; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
     v_tank=TANK_AREA*Ht
 
     # Excel
@@ -190,7 +191,7 @@ def main():
     for c,n,a,H,V in core_rows:
         st(ws2.cell(rr,1,c),b=True,fill=LT); st(ws2.cell(rr,2,n)); st(ws2.cell(rr,3,a)); st(ws2.cell(rr,4,H)); st(ws2.cell(rr,5,round(V,2))); rr+=1
     st(ws2.cell(rr,1,"مجموع الأكوار"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_cores,2)),b=True,fill=GRN); rr+=2
-    st(ws2.cell(rr,1,"الخزان T1 (L‑shape 10.51×9.70م، سماكة 350مم، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
+    st(ws2.cell(rr,1,f"الخزان T1 (L‑shape 10.51×9.70م، سماكة 350مم، ارتفاع {Ht}م من TANK SECTION، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
     for lbl,ar in [("حوائط الخزان T1 (L‑shape)", TANK_T1), ("CORE1 (T2) — كور ملتصق بالخزان، الجدار المشترك محسوب مرة واحدة", TANK_T2), ("العمود/الجدار الفاصل C3", TANK_T3)]:
         st(ws2.cell(rr,1,lbl),fill=LT,ha="right"); st(ws2.cell(rr,3,ar)); st(ws2.cell(rr,4,Ht)); st(ws2.cell(rr,5,round(ar*Ht,2))); rr+=1
     st(ws2.cell(rr,1,"مجموع الخزان"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_tank,2)),b=True,fill=GRN); rr+=1
@@ -212,7 +213,7 @@ def main():
 
     # ===== الإجمالي =====
     ws5=wb.create_sheet("الإجمالي"); ws5.sheet_view.rightToLeft=True
-    ws5.merge_cells("A1:C1"); st(ws5["A1"],b=True,sz=13,color="FFFFFF",fill=NAVY); ws5["A1"]="إجمالي خرسانة العناصر الرئيسية — لِفت 1"
+    ws5.merge_cells("A1:C1"); st(ws5["A1"],b=True,sz=13,color="FFFFFF",fill=NAVY); ws5["A1"]="إجمالي خرسانة العناصر الرأسية — لِفت 1"
     items=[("الأعمدة (65)", round(grand,2), "كل عمود من ظهر قاعدته حتى قاع السقف"),
            ("الحوائط المحيطة (W1+W4)", round(v_walls,2), f"سماكة {WALL_THK}م مُستخرَجة"),
            ("الأكوار (CORE1/2/3)", round(v_cores,2), f"مقطع من ST_WAll، ارتفاع {Hc}م حتى السقف"),
@@ -225,7 +226,7 @@ def main():
         st(ws5.cell(r5,3,nt),ha="right",fill=(None if v is not None else YEL));
         if v: tot+=v
         r5+=1
-    st(ws5.cell(r5,1,"الإجمالي (كل العناصر الرئيسية الرأسية)"),b=True,fill=NAVY,color="FFFFFF"); st(ws5.cell(r5,2,round(tot,2)),b=True,fill=GRN); st(ws5.cell(r5,3,"أعمدة + حوائط + أكوار + خزان + بادئ رمب")); r5+=1
+    st(ws5.cell(r5,1,"الإجمالي (كل العناصر الرأسية)"),b=True,fill=NAVY,color="FFFFFF"); st(ws5.cell(r5,2,round(tot,2)),b=True,fill=GRN); st(ws5.cell(r5,3,"أعمدة + حوائط + أكوار + خزان + بادئ رمب")); r5+=1
     st(ws5.cell(r5,1,"+ هدر 5٪"),b=True,fill=GREY); st(ws5.cell(r5,2,round(tot*WASTE,2)),b=True,fill=GRN); r5+=2
     st(ws5.cell(r5,1,"للمطابقة: الإجمالي بدون الحوائط المحيطة"),b=True,fill=YEL,ha="right"); st(ws5.cell(r5,2,round(tot-v_walls,2)),b=True,fill=YEL); st(ws5.cell(r5,3,"لو الـproject يحصر الحوائط في بند منفصل"),ha="right",fill=YEL); r5+=1
     st(ws5.cell(r5,1,"— منها: أعمدة + أكوار + خزان"),fill=LT,ha="right"); st(ws5.cell(r5,2,round(grand+v_cores+v_tank,2)),fill=LT); st(ws5.cell(r5,3,f"{round(grand,1)} + {round(v_cores,1)} + {round(v_tank,1)} (مطابق للـproject)"),ha="right",fill=LT); r5+=1
@@ -247,10 +248,10 @@ def main():
 
     tot_all=grand+v_walls+v_cores+v_tank+v_starter
     print(f"\nالحوائط {v_walls:.1f} | الأكوار {v_cores:.1f} | الخزان {v_tank:.1f} | بادئ الرمب {v_starter:.2f} م³")
-    print(f"الإجمالي الكلي (كل العناصر الرئيسية) = {tot_all:.1f} م³ | +هدر 5٪ = {tot_all*WASTE:.1f} م³")
+    print(f"الإجمالي الكلي (كل العناصر الرأسية) = {tot_all:.1f} م³ | +هدر 5٪ = {tot_all*WASTE:.1f} م³")
 
     os.makedirs(args.outdir,exist_ok=True)
-    out=os.path.join(args.outdir,"حصر خرسانة العناصر الرئيسية - لِفت 1.xlsx")
+    out=os.path.join(args.outdir,"حصر خرسانة العناصر الرأسية - لِفت 1.xlsx")
     wb.save(out); print("SAVED:",out)
 
 if __name__=="__main__":
