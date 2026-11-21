@@ -44,19 +44,38 @@ def footing_polys(msp):
                             bbox=(min(xs),max(xs),min(ys),max(ys))))
     return out
 
+HEAVY_MARKS = ("C3","C6","C7","C8","C9","C10")   # مقاطع كبيرة → يجب أن تقع داخل قواعد مُثخّنة
+
+def _align_footings(cols, foot):
+    """إزاحة (dx,dy) تحوّل إحداثي العمود إلى إطار اللبشة بمطابقة مراكز القواعد على الأعمدة.
+    لوحة القواعد تغطّي النطاق الأوسط فقط، فمحاذاة مركز‑الـbbox تنحرف؛ بدلاً منها نصوّت على
+    فرق (مركز القاعدة − موضع العمود) لكل الأزواج → أكثف عنقود = الإزاحة، ثم نُحسّنها بدقة
+    لتعظيم عدد الأعمدة التقيلة الواقعة داخل قواعدها (ثم إجمالي الأعمدة داخل القواعد)."""
+    if not foot: return (0.0, 0.0)
+    cxy=[(c[2],c[3]) for c in cols]
+    votes=collections.Counter()
+    for f in foot:
+        for x,y in cxy:
+            votes[(round((f["cx"]-x)/500)*500, round((f["cy"]-y)/500)*500)]+=1
+    bx,by=votes.most_common(1)[0][0]
+    heavy=[c for c in cols if c[1] in HEAVY_MARKS]
+    def score(dx,dy):
+        h=sum(1 for c in heavy if any(_pt_in_poly(c[2]+dx,c[3]+dy,f["poly"]) for f in foot))
+        t=sum(1 for c in cols  if any(_pt_in_poly(c[2]+dx,c[3]+dy,f["poly"]) for f in foot))
+        return (h,t)
+    best=None
+    for dx in range(bx-1500, bx+1500, 100):
+        for dy in range(by-1500, by+1500, 100):
+            s=score(dx,dy)
+            if best is None or s>best[0]: best=(s,dx,dy)
+    return (float(best[1]), float(best[2]))
+
 def column_bases(msp, verbose=False):
     """يعيد list أعمدة: dict(mark,x,y,base,zone). base = منسوب وش القاعدة."""
     plan,sched=ct.collect(msp)
     cols=[c for c in cc.columns_list(plan) if not c[1].startswith("CORE")]
     foot=footing_polys(msp)
-    # محاذاة: إزاحة مركز bbox القواعد → مركز bbox الأعمدة (نفس المقياس)
-    cxs=[c[2] for c in cols]; cys=[c[3] for c in cols]
-    fxs=[f["cx"] for f in foot]; fys=[f["cy"] for f in foot]
-    fallxs=[v for f in foot for v in (f["bbox"][0],f["bbox"][1])]
-    fallys=[v for f in foot for v in (f["bbox"][2],f["bbox"][3])]
-    ccx=(min(cxs)+max(cxs))/2; ccy=(min(cys)+max(cys))/2
-    fcx=(min(fallxs)+max(fallxs))/2; fcy=(min(fallys)+max(fallys))/2
-    dx,dy=fcx-ccx, fcy-ccy          # لتحويل إحداثي العمود إلى إطار اللبشة
+    dx,dy=_align_footings(cols, foot)   # محاذاة بالتصويت: تطابق مراكز القواعد على الأعمدة
     out=[]; zc=collections.Counter()
     for sn,m,x,y in cols:
         if m==WALL_MARK:
@@ -72,7 +91,7 @@ def column_bases(msp, verbose=False):
         print(f"أعمدة={len(out)} | قواعد مُثخّنة={len(foot)} | إزاحة المحاذاة Δ=({dx:.0f},{dy:.0f})")
         print("توزيع المناسيب:", dict(zc))
         # تحقق: الأعمدة التقيلة (مقاطع كبيرة) على قواعد مُثخّنة؟
-        heavy=[o for o in out if o["mark"] in ("C3","C6","C7","C8","C9","C10")]
+        heavy=[o for o in out if o["mark"] in HEAVY_MARKS]
         onf=sum(1 for o in heavy if o["base"]>MAT_TOP+0.01)
         print(f"تحقق: أعمدة تقيلة على قواعد مُثخّنة = {onf}/{len(heavy)}")
     return out
