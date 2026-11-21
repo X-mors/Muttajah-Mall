@@ -32,6 +32,8 @@ def compute(msp):
         wh=stages.get(m,[None])[0] if m in stages else None
         base,zone=base_map.get((round(x),round(y)),(cbl.MAT_TOP,f"المات {cbl.MAT_TOP}"))
         end=ends.get((round(x),round(y)),SOFFIT)
+        if (round(x),round(y)) in rs:   # نشوز أعمدة الرمب: تنزل للمات المنخفض ‑8.45
+            base=cbl.RAMP_PROJ_BASE; zone=f"نشوز حتى المات {cbl.RAMP_PROJ_BASE}"
         h=round(end-base,3)
         if wh: W,D=wh[0]/1000.0,wh[1]/1000.0; v=round(W*D*h,3)
         else: W=D=0; v=0.0

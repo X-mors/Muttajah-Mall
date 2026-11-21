@@ -65,6 +65,8 @@ def main():
         # — لا يكمل للسقف ولا يُخصم منه 16سم (قاع الرمب مخصوم أصلاً في منسوب النهاية).
         # باقي أعمدة الرمب تكمل كعمود كامل حتى السقف (خصم الكمرة/الهابط من منسوب النهاية فقط).
         ramp = (round(x),round(y)) in ramp_ends
+        if ramp:   # نشوز: العمود ينزل للمات المنخفض 40سم (وش ‑8.45) لا قاعدته المُثخّنة
+            base = cbl.RAMP_PROJ_BASE; zone = f"نشوز حتى المات {cbl.RAMP_PROJ_BASE}"
         h = round(end - base, 3)
         if ramp: n_ramp+=1
         if wh:
@@ -103,7 +105,23 @@ def main():
         if not rstr: raise ValueError
     except Exception:
         rstr=[("RAMP03",4.2,26.3,110.5),("RAMP04",3.9,25.0,97.5)]
-    starters=[(nm, w, STARTER_THK, STARTER_H, w*STARTER_THK*STARTER_H) for nm,w,h,a in rstr]
+    # بادئ الرمب = الكمرة المقلوبة عند بدايته (مقطعها من اللوحة: 'INV. B2(250X700)' بجانب 'With ramp')
+    import re as _re
+    st_w, st_d = STARTER_THK, STARTER_H
+    try:
+        import takeoff as _tk2
+        tt2=_tk2.all_titles(msp); rt2=[x for x in tt2 if "RAMPS REINFORCEMENT PLAN FOR LOWER" in x[2].upper()][0]
+        bx=_tk2.plan_bbox(tt2, rt2[0], rt2[1]); rx0,rx1,ry0,ry1=bx
+    except Exception:
+        rx0,rx1,ry0,ry1=-9e9,9e9,-9e9,9e9
+    for e in msp.query("TEXT MTEXT"):
+        try: t=" ".join((e.plain_text() if e.dxftype()=="MTEXT" else e.dxf.text).split())
+        except: continue
+        x,y=e.dxf.insert.x,e.dxf.insert.y
+        mm=_re.search(r"INV\.?\s*B\d?\s*\(?\s*(\d{3})\s*[xX×]\s*(\d{3})", t, _re.I)
+        if mm and rx0<=x<=rx1 and ry0<=y<=ry1:
+            st_w, st_d = int(mm.group(1))/1000.0, int(mm.group(2))/1000.0; break
+    starters=[(nm, w, st_w, st_d, w*st_w*st_d) for nm,w,h,a in rstr]   # طول=عرض الرمب، مقطع الكمرة المقلوبة
     v_starter=sum(s[4] for s in starters)
     # الأكوار والخزان على قواعد 1100مم (وش ‑7.75) → الارتفاع حتى قاع السقف = 3.68م
     # مساحات المقطع من تهشير الكور على لوحة COLUMNS&AXES (حوائط 300مم) — مطابقة لحصر الـproject.

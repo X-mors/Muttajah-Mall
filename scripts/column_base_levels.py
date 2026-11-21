@@ -96,27 +96,32 @@ def column_bases(msp, verbose=False):
         print(f"تحقق: أعمدة تقيلة على قواعد مُثخّنة = {onf}/{len(heavy)}")
     return out
 
-RAMP_SOFFIT_LOW  = -7.41   # قاع بلاطة الرمب عند أوطى عمود RAMP04 (SSL -7.25 − 0.16)
-RAMP_SOFFIT_HIGH = -5.23   # قاع بلاطة الرمب عند أعلى عمود واقف RAMP04
-RAMP03_STOP_END  = -4.60   # العمود الواحد الواقف في RAMP03 (قرب أعلى الرمب)
+RAMP_FFL   = -7.25         # أرضية الرمب (F.F.L) عند البادئ — من اللوحة (A-SYMB-LEVL '-7.25 F.F.L')
+RAMP_SSL   = -3.85         # قمة الرمب (S.S.L) حيث يلتقي السقف — من اللوحة
+RAMP_THK_S = 0.16          # سماكة بلاطة الرمب → قاع البلاطة = SSL − 0.16
+RAMP_PROJ_BASE = -8.45     # نشوز أعمدة الرمب: تنزل للمات المنخفض 40سم (وش ‑8.45)
+
+def _ramp_text_pts(msp, needle):
+    import re
+    out=[]
+    for e in msp.query("TEXT MTEXT"):
+        try: t=" ".join((e.plain_text() if e.dxftype()=="MTEXT" else e.dxf.text).split())
+        except: continue
+        if re.search(needle, t, re.I): out.append((e.dxf.insert.x, e.dxf.insert.y, t))
+    return out
 
 def ramp_column_ends(msp):
     """أعمدة الرمب المتوقّفة (علامة 'To Ramp Level' على طبقة 00-EG-Text) تنتهي عند
-    قاع بلاطة الرمب على الميل — لا تكمل للسقف. تُقرأ العلامات من اللوحة وتُربط بالأعمدة.
-    يعيد {(round(x),round(y)): end_level} لهذه الأعمدة فقط."""
+    قاع بلاطة الرمب على الميل — لا تكمل للسقف. **الاتجاه يُعيَّر من موضع بادئ الرمب**
+    (Ramp starter = أوطى نقطة ‑7.25): العمود الأقرب للبادئ = قاع الرمب (‑7.41)،
+    وكل ما ابتعدنا عن البادئ يرتفع قاع الرمب. يعيد {(round(x),round(y)): end_level}."""
     import re, math
     plan,_=ct.collect(msp); cols=[c for c in cc.columns_list(plan) if not c[1].startswith("CORE")]
     colx=[c[2] for c in cols]; coly=[c[3] for c in cols]
     rx0,rx1,ry0,ry1=min(colx)-8000,max(colx)+8000,min(coly)-8000,max(coly)+8000
-    labels=[]
-    for e in msp.query("TEXT MTEXT"):
-        try: t=" ".join((e.plain_text() if e.dxftype()=="MTEXT" else e.dxf.text).split())
-        except: continue
-        x,y=e.dxf.insert.x,e.dxf.insert.y
-        if rx0<=x<=rx1 and ry0<=y<=ry1 and re.search(r"To Ramp Level", t, re.I):
-            labels.append((x,y))
+    labels=[(x,y) for x,y,t in _ramp_text_pts(msp,r"To Ramp Level") if rx0<=x<=rx1 and ry0<=y<=ry1]
     if not labels: return {}
-    # كل علامة 'To Ramp Level' → أقرب عمود واحد لها (علامة واحدة = عمود واحد متوقّف)
+    # كل علامة → أقرب عمود واحد
     chosen={}
     for lx,ly in labels:
         best=None; bd=9e9
@@ -125,18 +130,40 @@ def ramp_column_ends(msp):
             if d<bd: bd=d; best=(m,x,y)
         if best and bd<4000: chosen[(round(best[1]),round(best[2]))]=best
     ramp_cols=list(chosen.values())
-    # تقسيم: الشريط الأيسر = RAMP04 (أعمدة واقفة، استيفاء الميل)، الباقي = RAMP03
-    left=[c for c in ramp_cols if c[1] < (min(colx)+max(colx))/2]   # x < منتصف المسقط
+    xmid=(min(colx)+max(colx))/2
+    # بادئا الرمب (إطار لوحة الرمب) → تحويل لإطار الأعمدة بإزاحة مطابقة ليبل RAMP04 لعنقود اليسار
+    starters=[(x,y) for x,y,t in _ramp_text_pts(msp,r"Ramp\s*starter")]
+    r04=[p for p in _ramp_text_pts(msp,r"RAMP\s*0?4")];
+    left=[c for c in ramp_cols if c[1] < xmid]; right=[c for c in ramp_cols if c[1] >= xmid]
+    # إزاحة إطار الرمب→الأعمدة من مركز عنقود اليسار مقابل ليبل RAMP04
+    dxv=dyv=0.0
+    if r04 and left:
+        lcx=sum(c[1] for c in left)/len(left); lcy=sum(c[2] for c in left)/len(left)
+        dxv=lcx-r04[0][0]; dyv=lcy-r04[0][1]
+    def starter_in_cols(group):
+        if not starters or not group: return None
+        gcx=sum(c[1] for c in group)/len(group)
+        cand=[(sx+dxv, sy+dyv) for sx,sy in starters]
+        return min(cand, key=lambda p: abs(p[0]-gcx))   # البادئ الأقرب لعنقود المجموعة بالـx
+    # ميل الرمب من اللوحة (A-SYMB '7.50%' في سيكشن الرمب) — لا يُفترض
+    slope=0.075
+    for sx,sy,t in _ramp_text_pts(msp,r"\d+\.\d+\s*%"):
+        mm=re.search(r"(\d+\.\d+)\s*%", t)
+        if mm and -445000<=sx<=-410000: slope=float(mm.group(1))/100.0; break
+    soffit_bottom=round(RAMP_FFL-RAMP_THK_S,2)   # ‑7.41 (قاع بلاطة الرمب عند أرضية ‑7.25)
+    soffit_top=round(RAMP_SSL-RAMP_THK_S,2)      # ‑4.01 (عند قمة الرمب)
     out={}
-    if left:
-        ys=[c[2] for c in left]; ymin,ymax=min(ys),max(ys); span=(ymax-ymin) or 1
-        for m,x,y in left:
-            frac=(y-ymin)/span
-            end=round(RAMP_SOFFIT_LOW+frac*(RAMP_SOFFIT_HIGH-RAMP_SOFFIT_LOW),3)
+    for group in (left, right):
+        if not group: continue
+        st=starter_in_cols(group)
+        if st is None:   # fallback: البادئ شمال (أعلى y)
+            st=(sum(c[1] for c in group)/len(group), max(c[2] for c in group)+1)
+        dists=[(c, math.hypot(c[1]-st[0], c[2]-st[1])) for c in group]
+        dmin=min(d for _,d in dists)
+        for (m,x,y),d in dists:
+            # قاع الرمب يرتفع بالميل كل ما ابتعدنا عن البادئ؛ العمود الأقرب ≈ قاع الرمب
+            end=round(min(soffit_bottom+(d-dmin)/1000.0*slope, soffit_top),3)
             out[(round(x),round(y))]=end
-    for m,x,y in ramp_cols:
-        if (round(x),round(y)) not in out:   # RAMP03 الواقف
-            out[(round(x),round(y))]=RAMP03_STOP_END
     return out
 
 def column_ends(msp, ceil_ssl=-3.85):
