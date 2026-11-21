@@ -110,9 +110,14 @@ def main():
     CORE_BASE=-7.75
     Hc = round(soffit - CORE_BASE, 2)                       # 3.68
     CORE_AREA={"CORE2":2.55, "CORE3":6.00}                  # م² (CORE3 صندوق 4.0×7.2م؛ CORE2 شكل U 2.9×3.1م). CORE1 مع الخزان.
+    CORE_LABEL={"CORE3":"CORE3 — كور سلالم","CORE2":"CORE2 — كور أسانسير"}
+    # كل كور يُحصَر بعدد تكراره في المسقط (CORE3 مكرّر = K1+K2 → مرتين، لا نموذج واحد)
     core_rows=[]; v_cores=0.0
     for c in sorted([x for x in cores if x in CORE_AREA]):
-        a=CORE_AREA[c]; v=counts[c]*a*Hc; core_rows.append((c, counts[c], a, Hc, v)); v_cores+=v
+        a=CORE_AREA[c]; n=counts[c]
+        for k in range(1,n+1):
+            tag=f"{CORE_LABEL.get(c,c)}" + (f" (نسخة {k}/{n})" if n>1 else "")
+            v=a*Hc; core_rows.append((tag, 1, a, Hc, v)); v_cores+=v
     # الخزان: حوائط L (16.63) + ضلعا CORE1 (1.35) + العمود الفاصل C3 (0.65) × الارتفاع
     TANK_T1=16.63; TANK_T2=1.35; TANK_T3=0.65; Ht=Hc; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
     v_tank=TANK_AREA*Ht
@@ -168,7 +173,7 @@ def main():
         st(ws2.cell(rr,1,c),b=True,fill=LT); st(ws2.cell(rr,2,n)); st(ws2.cell(rr,3,a)); st(ws2.cell(rr,4,H)); st(ws2.cell(rr,5,round(V,2))); rr+=1
     st(ws2.cell(rr,1,"مجموع الأكوار"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_cores,2)),b=True,fill=GRN); rr+=2
     st(ws2.cell(rr,1,"الخزان T1 (L‑shape 10.51×9.70م، سماكة 350مم، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
-    for lbl,ar in [("حوائط الخزان T1", TANK_T1), ("ضلعا CORE1 (T2)", TANK_T2), ("العمود الفاصل C3 (T3)", TANK_T3)]:
+    for lbl,ar in [("حوائط الخزان T1 (L‑shape)", TANK_T1), ("CORE1 (T2) — كور ملتصق بالخزان، الجدار المشترك محسوب مرة واحدة", TANK_T2), ("العمود/الجدار الفاصل C3", TANK_T3)]:
         st(ws2.cell(rr,1,lbl),fill=LT,ha="right"); st(ws2.cell(rr,3,ar)); st(ws2.cell(rr,4,Ht)); st(ws2.cell(rr,5,round(ar*Ht,2))); rr+=1
     st(ws2.cell(rr,1,"مجموع الخزان"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_tank,2)),b=True,fill=GRN); rr+=1
     for j,w in enumerate([30,14,12,9,10],1): ws2.column_dimensions[get_column_letter(j)].width=w
@@ -202,9 +207,11 @@ def main():
         st(ws5.cell(r5,3,nt),ha="right",fill=(None if v is not None else YEL));
         if v: tot+=v
         r5+=1
-    st(ws5.cell(r5,1,"الإجمالي (المحسوب)"),b=True,fill=NAVY,color="FFFFFF"); st(ws5.cell(r5,2,round(tot,2)),b=True,fill=GRN); st(ws5.cell(r5,3,"بدون الأكوار والخزان")); r5+=1
-    st(ws5.cell(r5,1,"+ هدر 5٪"),b=True,fill=GREY); st(ws5.cell(r5,2,round(tot*WASTE,2)),b=True,fill=GRN); r5+=1
-    for j,w in enumerate([26,12,30],1): ws5.column_dimensions[get_column_letter(j)].width=w
+    st(ws5.cell(r5,1,"الإجمالي (كل العناصر الرئيسية الرأسية)"),b=True,fill=NAVY,color="FFFFFF"); st(ws5.cell(r5,2,round(tot,2)),b=True,fill=GRN); st(ws5.cell(r5,3,"أعمدة + حوائط + أكوار + خزان + بادئ رمب")); r5+=1
+    st(ws5.cell(r5,1,"+ هدر 5٪"),b=True,fill=GREY); st(ws5.cell(r5,2,round(tot*WASTE,2)),b=True,fill=GRN); r5+=2
+    st(ws5.cell(r5,1,"للمطابقة: الإجمالي بدون الحوائط المحيطة"),b=True,fill=YEL,ha="right"); st(ws5.cell(r5,2,round(tot-v_walls,2)),b=True,fill=YEL); st(ws5.cell(r5,3,"لو الـproject يحصر الحوائط في بند منفصل"),ha="right",fill=YEL); r5+=1
+    st(ws5.cell(r5,1,"— منها: أعمدة + أكوار + خزان"),fill=LT,ha="right"); st(ws5.cell(r5,2,round(grand+v_cores+v_tank,2)),fill=LT); st(ws5.cell(r5,3,f"{round(grand,1)} + {round(v_cores,1)} + {round(v_tank,1)} (مطابق للـproject)"),ha="right",fill=LT); r5+=1
+    for j,w in enumerate([30,12,34],1): ws5.column_dimensions[get_column_letter(j)].width=w
 
     # ===== أسئلة ومُعلَّقات (في الآخر) =====
     ws4=wb.create_sheet("أسئلة ومُعلَّقات"); ws4.sheet_view.rightToLeft=True
