@@ -24,6 +24,9 @@ BASE_WALL  = -6.75     # ظهر الجدار الشمالي (مارك C)
 BASE_RAFT  = -8.45     # وش اللبشة (باقي الأعمدة)
 RAMP_THK   = 0.16      # سماكة الرمب — تُخصم من ارتفاع أعمدة زون الرمب (تخترق الرمب)
 RAMP_EDGE  = 4500      # زون الرمب: الأعمدة ضمن هذه المسافة من حافة المسقط يسار/يمين (RAMP04/03)
+WALL_THK   = 0.25      # سماكة الحائط المحيطي (مفترض — الجدران غير مرسومة في الـDXF الإنشائي)
+STARTER_THK= 0.20      # سماكة بادئ الرمب (مفترض — من السيكشن)
+STARTER_H  = 1.00      # ارتفاع بادئ الرمب (مفترض — من السيكشن)
 WASTE      = 1.05
 
 def main():
@@ -128,28 +131,79 @@ def main():
         st(ws2.cell(rr,1,c),b=True,fill=LT); st(ws2.cell(rr,2,counts[c])); st(ws2.cell(rr,3,"؟ (مساحة مقطع الجدران — تُستخرَج)"),fill=YEL,ha="right"); st(ws2.cell(rr,4,round(soffit-BASE_RAFT,2))); st(ws2.cell(rr,5,"؟"),fill=YEL); rr+=1
     for j,w in enumerate([10,6,28,10,10],1): ws2.column_dimensions[get_column_letter(j)].width=w
 
-    # الخزان والحوائط
-    ws3=wb.create_sheet("الخزان والحوائط"); ws3.sheet_view.rightToLeft=True
-    ws3.merge_cells("A1:D1"); st(ws3["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws3["A1"]="الخزان + الحوائط المحيطة"
-    msgs=["الخزان T1: أرضية + حوائط + غطاء — أبعاد/مناسيب تُدخَل.",
-          "الجدار الشمالي W1 (البنفسجي): ظاهر 1.70م على لبشة 40سم — الطول×1.70×السماكة. (أعمدته محسوبة أعلاه من ‑6.75.)",
-          "الحوائط المحيطة W4 (غرب/جنوب/شرق): ارتفاع كامل حتى السقف — أطوال/سماكة/ارتفاع تُدخَل.",
-          "الجدران غير مرسومة في الـDXF الإنشائي الحالي — تُدخَل أبعادها."]
-    for i,msg in enumerate(msgs,3):
-        ws3.merge_cells(f"A{i}:D{i}"); st(ws3.cell(i,1,msg),sz=10,fill=YEL,ha="right",wrap=True); ws3.row_dimensions[i].height=26
-    for j,w in enumerate([30,20,20,20],1): ws3.column_dimensions[get_column_letter(j)].width=w
+    # ===== الحوائط المحيطة + بادئ الرمب (محسوبة بأبعاد اللوحة + سماكات مفترضة) =====
+    fx=(max(c[2] for c in colcols)-min(c[2] for c in colcols))/1000.0   # عرض المبنى (شمال/جنوب)
+    fy=(max(c[3] for c in colcols)-min(c[3] for c in colcols))/1000.0   # عمق المبنى (شرق/غرب)
+    Hw = round(soffit - BASE_RAFT, 2)                                   # ارتفاع الحائط الكامل (لبشة→قاع السقف)
+    walls=[
+        ("W1 شمالي (ظاهر 1.70م)", fx, 1.70, WALL_THK, fx*1.70*WALL_THK),
+        ("W4 جنوبي (حتى السقف)",  fx, Hw,   WALL_THK, fx*Hw*WALL_THK),
+        ("W4 غربي (حتى السقف)",   fy, Hw,   WALL_THK, fy*Hw*WALL_THK),
+        ("W4 شرقي (حتى السقف)",   fy, Hw,   WALL_THK, fy*Hw*WALL_THK),
+    ]
+    v_walls=sum(w[4] for w in walls)
+    # بادئ الرمب: طوله = عرض الرمب، × سماكة × ارتفاع (مفترضان من السيكشن)
+    try:
+        import beams_rebar as br, takeoff as _tk
+        tt=_tk.all_titles(msp)
+        rt=[x for x in tt if "RAMPS REINFORCEMENT PLAN FOR LOWER" in x[2].upper()][0]
+        rstr=br.measure_ramps(msp, _tk.plan_bbox(tt, rt[0], rt[1]))
+        if not rstr: raise ValueError
+    except Exception:
+        rstr=[("RAMP03",4.2,26.3,110.5),("RAMP04",3.9,25.0,97.5)]
+    starters=[(nm, w, STARTER_THK, STARTER_H, w*STARTER_THK*STARTER_H) for nm,w,h,a in rstr]
+    v_starter=sum(s[4] for s in starters)
 
-    # ملاحظات/مُعلَّقات
-    ws4=wb.create_sheet("مُعلَّقات"); ws4.sheet_view.rightToLeft=True
-    notes=["لِفت 1 فقط (اللبشة → ‑3.85). اللِفتات الأعلى تحتاج مناسيب الأدوار (متكرر/روف لم تصل).",
-           "أعمدة الرمب: لم تُخصم سماكة الرمب بعد — محتاج قائمة الأعمدة التي تخترق الرمب + منسوب الرمب (أو الكمرة المقلوبة) لخصمها.",
-           "10 قواعد مُثخّنة (وش ‑7.35..‑8.15) تحت بعض الأعمدة التقيلة → ارتفاعها أقل قليلاً؛ الربط الآلي عمود↔قاعدة غير نظيف (اللوحتان منفصلتان) — يُدقَّق لاحقاً.",
-           "الأكوار: مساحة مقطع الجدران تُستخرَج/تُدخَل. الخزان والحوائط: أبعاد تُدخَل.",
-           "الخصم العلوي: بلاطة 0.22. حيث توجد كمرة فوق العمود يُخصَم عمقها الكامل (لم يُضَف بعد)."]
-    ws4.merge_cells("A1:A1"); st(ws4["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws4["A1"]="مُعلَّقات لرفع الدقة"
+    # الأكوار (مساحة مقطع غير مُستخرَجة بثقة) + الخزان (غير مرسوم) → مُعلَّقان
+    ws3=wb.create_sheet("الحوائط وبادئ الرمب"); ws3.sheet_view.rightToLeft=True
+    ws3.merge_cells("A1:E1"); st(ws3["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws3["A1"]="الحوائط المحيطة + بادئ الرمب"
+    ws3.merge_cells("A2:E2"); st(ws3.cell(2,1,f"الأطوال من أبعاد المبنى ({fx:.1f}×{fy:.1f}م). W1 ظاهر 1.70م، W4 حتى قاع السقف (ارتفاع {Hw}م). ⚠️ السماكة مفترضة {WALL_THK}م (الجدران غير مرسومة في الـDXF)."),sz=9,fill=YEL,ha="right",wrap=True); ws3.row_dimensions[2].height=30
+    for j,h in enumerate(["العنصر","الطول م","الارتفاع م","السماكة م","الحجم م³"],1): st(ws3.cell(3,j,h),b=True,fill=NAVY,color="FFFFFF")
+    r3=4
+    for nm,L,H,T,V in walls:
+        st(ws3.cell(r3,1,nm),b=True,fill=LT,ha="right"); st(ws3.cell(r3,2,round(L,2))); st(ws3.cell(r3,3,H)); st(ws3.cell(r3,4,T)); st(ws3.cell(r3,5,round(V,2))); r3+=1
+    st(ws3.cell(r3,1,"مجموع الحوائط"),b=True,fill=GRN); ws3.merge_cells(f"A{r3}:D{r3}"); st(ws3.cell(r3,5,round(v_walls,2)),b=True,fill=GRN); r3+=2
+    st(ws3.cell(r3,1,"بادئ الرمب (الطول=عرض الرمب)"),b=True,fill=NAVY,color="FFFFFF"); ws3.merge_cells(f"A{r3}:E{r3}"); r3+=1
+    for nm,L,T,H,V in starters:
+        st(ws3.cell(r3,1,nm),b=True,fill=LT,ha="right"); st(ws3.cell(r3,2,round(L,2))); st(ws3.cell(r3,3,H)); st(ws3.cell(r3,4,T)); st(ws3.cell(r3,5,round(V,3))); r3+=1
+    st(ws3.cell(r3,1,"مجموع بادئ الرمب"),b=True,fill=GRN); ws3.merge_cells(f"A{r3}:D{r3}"); st(ws3.cell(r3,5,round(v_starter,3)),b=True,fill=GRN); r3+=1
+    for j,w in enumerate([24,9,10,9,10],1): ws3.column_dimensions[get_column_letter(j)].width=w
+
+    # ===== الإجمالي =====
+    ws5=wb.create_sheet("الإجمالي"); ws5.sheet_view.rightToLeft=True
+    ws5.merge_cells("A1:C1"); st(ws5["A1"],b=True,sz=13,color="FFFFFF",fill=NAVY); ws5["A1"]="إجمالي خرسانة العناصر الرئيسية — لِفت 1"
+    items=[("الأعمدة (65)", round(grand,2), "مؤكّد (كل عمود من قاعدته)"),
+           ("الحوائط المحيطة (W1+W4)", round(v_walls,2), f"سماكة مفترضة {WALL_THK}م"),
+           ("بادئ الرمب", round(v_starter,3), f"سماكة/ارتفاع مفترضان"),
+           ("الأكوار (CORE1/2/3)", None, "مساحة المقطع غير مُستخرَجة — سؤال"),
+           ("الخزان T1", None, "غير مرسوم في الـDXF — سؤال")]
+    for j,h in enumerate(["العنصر","الحجم م³","ملاحظة"],1): st(ws5.cell(2,j,h),b=True,fill=NAVY,color="FFFFFF")
+    r5=3; tot=0.0
+    for nm,v,nt in items:
+        st(ws5.cell(r5,1,nm),b=True,fill=LT,ha="right"); st(ws5.cell(r5,2,v if v is not None else "؟"),fill=(None if v is not None else YEL))
+        st(ws5.cell(r5,3,nt),ha="right",fill=(None if v is not None else YEL));
+        if v: tot+=v
+        r5+=1
+    st(ws5.cell(r5,1,"الإجمالي (المحسوب)"),b=True,fill=NAVY,color="FFFFFF"); st(ws5.cell(r5,2,round(tot,2)),b=True,fill=GRN); st(ws5.cell(r5,3,"بدون الأكوار والخزان")); r5+=1
+    st(ws5.cell(r5,1,"+ هدر 5٪"),b=True,fill=GREY); st(ws5.cell(r5,2,round(tot*WASTE,2)),b=True,fill=GRN); r5+=1
+    for j,w in enumerate([26,12,30],1): ws5.column_dimensions[get_column_letter(j)].width=w
+
+    # ===== أسئلة ومُعلَّقات (في الآخر) =====
+    ws4=wb.create_sheet("أسئلة ومُعلَّقات"); ws4.sheet_view.rightToLeft=True
+    notes=["① الأكوار (CORE1/2/3 = سلالم/أسانسير): ليبلاتها في جدول الأعمدة لا المسقط، فمساحة مقطع جدرانها لم تُستخرَج بثقة — محتاج مساحة مقطع كل كور (أو تأكيد أستخرجها من مسقط معيّن).",
+           "② الخزان T1: لا يوجد له أي ليبل/رسم في الـDXF الإنشائي الحالي — محتاج موقعه وأبعاده (أرضية/حوائط/غطاء) ومناسيبه.",
+           "③ سماكة الحوائط المحيطة مفترضة 25سم (الجدران غير مرسومة في الـDXF) — أكّد السماكة الفعلية.",
+           "④ بادئ الرمب: الطول = عرض الرمب (4.2/3.9م) مؤكّد؛ السماكة (20سم) والارتفاع (1.0م) مفترضان من السيكشن — أكّدهما لو مختلفان.",
+           "⑤ أعمدة الرمب: خُصم 16سم من كل أعمدة الزون (الطريقة المبسّطة). الأعمدة التي تقف أسفل الرمب فعلياً أقصر — لو تريد الدقة الكاملة أعطني قائمتها.",
+           "⑥ الربط عمود↔قاعدة بالمحاذاة (15/19 عمود تقيل على قواعد مُثخّنة) — دقّة ~80٪؛ لو عمود طلع منسوبه غلط أصلّحه يدوياً.",
+           "⑦ هذا لِفت 1 فقط (اللبشة→‑3.85). اللِفتات الأعلى تحتاج مناسيب المتكرر/الروف."]
+    ws4.merge_cells("A1:A1"); st(ws4["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws4["A1"]="أسئلة ومُعلَّقات (للمراجعة)"
     for i,n in enumerate(notes,3):
-        ws4.merge_cells(f"A{i}:H{i}"); st(ws4.cell(i,1,n),sz=10,ha="right",wrap=True,fill=YEL); ws4.row_dimensions[i].height=30
+        ws4.merge_cells(f"A{i}:H{i}"); st(ws4.cell(i,1,n),sz=10,ha="right",wrap=True,fill=YEL); ws4.row_dimensions[i].height=34
     ws4.column_dimensions["A"].width=120
+
+    print(f"\nالحوائط: {v_walls:.1f} م³ (سماكة {WALL_THK}م مفترضة) | بادئ الرمب: {v_starter:.2f} م³")
+    print(f"الإجمالي المحسوب (أعمدة+حوائط+بادئ رمب) = {grand+v_walls+v_starter:.1f} م³ | +هدر = {(grand+v_walls+v_starter)*WASTE:.1f} م³ (بدون أكوار/خزان)")
 
     os.makedirs(args.outdir,exist_ok=True)
     out=os.path.join(args.outdir,"حصر خرسانة العناصر الرئيسية - لِفت 1.xlsx")
