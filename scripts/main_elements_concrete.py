@@ -48,6 +48,7 @@ def main():
     bl = cbl.column_bases(msp)
     base_map = {(round(o["x"]), round(o["y"])): (o["base"], o["zone"]) for o in bl}
     end_map = cbl.column_ends(msp, ceil_ssl=args.ceil)   # نهاية كل عمود: خصم الهابط/الكمرة/البلاطة
+    ramp_ends = cbl.ramp_column_ends(msp)                 # أعمدة 'To Ramp Level' المتوقّفة (نهايتها قاع الرمب)
 
     # ترتيب الأعمدة (أعلى→أسفل ثم يسار→يمين) وترقيمها
     colcols=[c for c in cols if not c[1].startswith("CORE")]
@@ -60,9 +61,11 @@ def main():
         base, zone = base_map.get((round(x),round(y)), (BASE_RAFT, f"المات {BASE_RAFT}"))
         end = end_map.get((round(x),round(y)), soffit)   # منسوب نهاية العمود (قاع الهابط/الكمرة/البلاطة)
         wall = (m=="C")
-        # زون الرمب: الأعمدة عند حافة المسقط (يسار RAMP04 / يمين RAMP03) غير أعمدة الجدار → تخترق الرمب
-        ramp = (not wall) and (x < xmin+RAMP_EDGE or x > xmax-RAMP_EDGE)
-        h = round(end - base - (RAMP_THK if ramp else 0.0), 3)
+        # عمود رمب متوقّف (علامة 'To Ramp Level' باللوحة): نهايته = قاع بلاطة الرمب على الميل (من الأداة)
+        # — لا يكمل للسقف ولا يُخصم منه 16سم (قاع الرمب مخصوم أصلاً في منسوب النهاية).
+        # باقي أعمدة الرمب تكمل كعمود كامل حتى السقف (خصم الكمرة/الهابط من منسوب النهاية فقط).
+        ramp = (round(x),round(y)) in ramp_ends
+        h = round(end - base, 3)
         if ramp: n_ramp+=1
         if wh:
             W,D=wh[0]/1000.0, wh[1]/1000.0; v=W*D*h
@@ -80,7 +83,7 @@ def main():
     print(f"{'ماركة':6}{'عدد':5}{'حجم م³':9}")
     for m in sorted(per_mark, key=ct.mark_key):
         print(f"{m:6}{per_mark[m]['n']:<5}{per_mark[m]['v']:<9.1f}")
-    print(f"\nأعمدة الرمب (خُصم منها 16سم): {n_ramp}")
+    print(f"\nأعمدة الرمب المتوقّفة عند قاع الرمب (To Ramp Level): {n_ramp}")
     print(f"إجمالي خرسانة الأعمدة (لِفت 1) = {grand:.1f} م³ | +هدر = {grand*WASTE:.1f} م³  | عدد الأعمدة {len(rows)}")
     print(f"الأكوار: {cores}")
 
@@ -128,7 +131,7 @@ def main():
     for j,h in enumerate(["#","الماركة","المقطع (مم)","ظهر القاعدة","الارتفاع م","الحجم م³","نوع القاعدة","ملاحظة"],1): st(ws.cell(3,j,h),b=True,fill=NAVY,color="FFFFFF")
     r=4
     for d in rows:
-        note = "جدار شمالي W1" if d["wall"] else ("رمب: خصم 16سم" if d["ramp"] else "")
+        note = "جدار شمالي W1" if d["wall"] else ("يقف عند قاع الرمب" if d["ramp"] else "")
         fill = PUR if d["wall"] else (YEL if d["ramp"] else None)
         st(ws.cell(r,1,d["no"]),fill=fill); st(ws.cell(r,2,d["mark"]),b=True,fill=fill or LT)
         st(ws.cell(r,3,d["sec"])); st(ws.cell(r,4,f"{d['base']:+.2f}")); st(ws.cell(r,5,d["h"]))

@@ -77,9 +77,53 @@ def column_bases(msp, verbose=False):
         print(f"تحقق: أعمدة تقيلة على قواعد مُثخّنة = {onf}/{len(heavy)}")
     return out
 
+RAMP_SOFFIT_LOW  = -7.41   # قاع بلاطة الرمب عند أوطى عمود RAMP04 (SSL -7.25 − 0.16)
+RAMP_SOFFIT_HIGH = -5.23   # قاع بلاطة الرمب عند أعلى عمود واقف RAMP04
+RAMP03_STOP_END  = -4.60   # العمود الواحد الواقف في RAMP03 (قرب أعلى الرمب)
+
+def ramp_column_ends(msp):
+    """أعمدة الرمب المتوقّفة (علامة 'To Ramp Level' على طبقة 00-EG-Text) تنتهي عند
+    قاع بلاطة الرمب على الميل — لا تكمل للسقف. تُقرأ العلامات من اللوحة وتُربط بالأعمدة.
+    يعيد {(round(x),round(y)): end_level} لهذه الأعمدة فقط."""
+    import re, math
+    plan,_=ct.collect(msp); cols=[c for c in cc.columns_list(plan) if not c[1].startswith("CORE")]
+    colx=[c[2] for c in cols]; coly=[c[3] for c in cols]
+    rx0,rx1,ry0,ry1=min(colx)-8000,max(colx)+8000,min(coly)-8000,max(coly)+8000
+    labels=[]
+    for e in msp.query("TEXT MTEXT"):
+        try: t=" ".join((e.plain_text() if e.dxftype()=="MTEXT" else e.dxf.text).split())
+        except: continue
+        x,y=e.dxf.insert.x,e.dxf.insert.y
+        if rx0<=x<=rx1 and ry0<=y<=ry1 and re.search(r"To Ramp Level", t, re.I):
+            labels.append((x,y))
+    if not labels: return {}
+    # كل علامة 'To Ramp Level' → أقرب عمود واحد لها (علامة واحدة = عمود واحد متوقّف)
+    chosen={}
+    for lx,ly in labels:
+        best=None; bd=9e9
+        for sn,m,x,y in cols:
+            d=math.hypot(lx-x,ly-y)
+            if d<bd: bd=d; best=(m,x,y)
+        if best and bd<4000: chosen[(round(best[1]),round(best[2]))]=best
+    ramp_cols=list(chosen.values())
+    # تقسيم: الشريط الأيسر = RAMP04 (أعمدة واقفة، استيفاء الميل)، الباقي = RAMP03
+    left=[c for c in ramp_cols if c[1] < (min(colx)+max(colx))/2]   # x < منتصف المسقط
+    out={}
+    if left:
+        ys=[c[2] for c in left]; ymin,ymax=min(ys),max(ys); span=(ymax-ymin) or 1
+        for m,x,y in left:
+            frac=(y-ymin)/span
+            end=round(RAMP_SOFFIT_LOW+frac*(RAMP_SOFFIT_HIGH-RAMP_SOFFIT_LOW),3)
+            out[(round(x),round(y))]=end
+    for m,x,y in ramp_cols:
+        if (round(x),round(y)) not in out:   # RAMP03 الواقف
+            out[(round(x),round(y))]=RAMP03_STOP_END
+    return out
+
 def column_ends(msp, ceil_ssl=-3.85):
     """منسوب نهاية كل عمود = ceil_ssl ناقص (بلاطة 0.22 / هابط 0.32 / عمق الكمرة فوقه).
     يحاذي لوحة سقف البدروم السفلي (هوابط S-TEXT + كمرات S -Beams) بالأعمدة ويربط كل عمود بما فوقه.
+    أعمدة الرمب المتوقّفة (علامة 'To Ramp Level') تُستبدل بقاع بلاطة الرمب على الميل.
     يعيد {(round(x),round(y)): end_level}."""
     import takeoff, beams_rebar as br, re, math
     titles=takeoff.all_titles(msp)
@@ -115,6 +159,8 @@ def column_ends(msp, ceil_ssl=-3.85):
         elif best_bd<400 and beamD: end=ceil_ssl-beamD/1000.0
         else: end=ceil_ssl-0.22
         out[(round(x),round(y))]=round(end,3)
+    # أعمدة الرمب المتوقّفة: تُستبدَل نهايتها بقاع بلاطة الرمب على الميل (أوطى من السقف)
+    out.update(ramp_column_ends(msp))
     return out
 
 if __name__=="__main__":
