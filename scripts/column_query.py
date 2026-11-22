@@ -36,6 +36,8 @@ def compute(msp):
         end=ends.get((round(x),round(y)),SOFFIT)
         if (round(x),round(y)) in rs:   # نشوز أعمدة الرمب: تنزل للمات المنخفض ‑8.45
             base=cbl.RAMP_PROJ_BASE; zone=f"نشوز حتى المات {cbl.RAMP_PROJ_BASE}"
+        ov=cbl.lift1_overrides().get((round(x),round(y)))   # تصحيح معتمَد (قراءة البروجكت)
+        if ov: base,end=ov; zone="حصر معتمَد (البروجكت)"
         h=round(end-base,3)
         if wh: W,D=wh[0]/1000.0,wh[1]/1000.0; v=round(W*D*h,3)
         else: W=D=0; v=0.0

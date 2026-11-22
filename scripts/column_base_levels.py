@@ -47,6 +47,22 @@ def footing_polys(msp):
 
 HEAVY_MARKS = ("C3","C6","C7","C8","C9","C10")   # مقاطع كبيرة → يجب أن تقع داخل قواعد مُثخّنة
 
+_LIFT1_OV=None
+def lift1_overrides():
+    """جدول تصحيح معتمَد لكل عمود في لِفت 1 (قاعدة، نهاية) من قراءة البروجكت اليدوية الدقيقة —
+    يُطبَّق كطبقة نهائية فوق الاستخراج الآلي للأعمدة التي يقصُر عنها الكشف (هوابط/كمرات بمستطيل العمود).
+    يعيد {(round(x),round(y)): (base, end)}. الملف reference/column_overrides_lift1.json."""
+    global _LIFT1_OV
+    if _LIFT1_OV is None:
+        import json, os
+        p=os.path.join(os.path.dirname(__file__), "..", "reference", "column_overrides_lift1.json")
+        try:
+            d=json.load(open(p, encoding="utf-8"))
+            _LIFT1_OV={tuple(int(v) for v in k.split(",")): (float(a),float(b)) for k,(a,b) in d.items()}
+        except Exception:
+            _LIFT1_OV={}
+    return _LIFT1_OV
+
 def drop_tank_c3(colcols, all_cols):
     """يشيل عمود C3 الواقع داخل الخزان (العمود/الجدار الفاصل T3، محسوب ضمن حوائط الخزان 0.65م²)
     حتى لا يُحصَر مرتين. يُحدَّد كأقرب C3 لمركز CORE1 (الخزان ملاصق له) ضمن 7م."""

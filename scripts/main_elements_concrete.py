@@ -68,6 +68,8 @@ def main():
         ramp = (round(x),round(y)) in ramp_ends
         if ramp:   # نشوز: العمود ينزل للمات المنخفض 40سم (وش ‑8.45) لا قاعدته المُثخّنة
             base = cbl.RAMP_PROJ_BASE; zone = f"نشوز حتى المات {cbl.RAMP_PROJ_BASE}"
+        ov = cbl.lift1_overrides().get((round(x),round(y)))   # تصحيح معتمَد (قراءة البروجكت) — أولوية نهائية
+        if ov: base, end = ov; zone = (zone+" | معتمَد" if ramp else "حصر معتمَد (البروجكت)")
         h = round(end - base, 3)
         if ramp: n_ramp+=1
         if wh:
