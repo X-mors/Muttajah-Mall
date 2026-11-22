@@ -152,12 +152,29 @@ def ramp_column_ends(msp):
     rx0,rx1,ry0,ry1=min(colx)-8000,max(colx)+8000,min(coly)-8000,max(coly)+8000
     labels=[(x,y) for x,y,t in _ramp_text_pts(msp,r"To Ramp Level") if rx0<=x<=rx1 and ry0<=y<=ry1]
     if not labels: return {}
-    # كل علامة → أقرب عمود واحد
+    # خطوط الليدر (سهم العلامة للعمود) — تُتبَّع لتحديد العمود الصح لا الأقرب للنص
+    leads=[]
+    for e in msp.query("LWPOLYLINE LINE LEADER"):
+        try:
+            if e.dxftype()=="LINE": pts=[(e.dxf.start.x,e.dxf.start.y),(e.dxf.end.x,e.dxf.end.y)]
+            elif e.dxftype()=="LEADER": pts=[(v.x,v.y) for v in e.vertices]
+            else: pts=list(e.get_points("xy"))
+        except: continue
+        if len(pts)>=2: leads.append((pts[0],pts[-1]))
+    def anchor(lx,ly):
+        # لو في ليدر طرفه عند النص، نأخذ طرفه الآخر (المؤشِّر على العمود)
+        best=None; bd=900
+        for a,b in leads:
+            for p,q in ((a,b),(b,a)):
+                d=math.hypot(p[0]-lx,p[1]-ly)
+                if d<bd: bd=d; best=q
+        return best if best else (lx,ly)
     chosen={}
     for lx,ly in labels:
+        ax,ay=anchor(lx,ly)
         best=None; bd=9e9
         for sn,m,x,y in cols:
-            d=math.hypot(lx-x,ly-y)
+            d=math.hypot(ax-x,ay-y)
             if d<bd: bd=d; best=(m,x,y)
         if best and bd<4000: chosen[(round(best[1]),round(best[2]))]=best
     ramp_cols=list(chosen.values())
@@ -227,10 +244,29 @@ def column_ends(msp, ceil_ssl=-3.85):
     colx=[c[2] for c in cols]; coly=[c[3] for c in cols]
     dxs=[d[0] for d in drops]+[b['cx'] for b in beams]; dys=[d[1] for d in drops]+[b['cy'] for b in beams]
     if not dxs: return {(round(c[2]),round(c[3])): ceil_ssl-0.22 for c in cols}
+    # محاذاة لوحة السقف بالأعمدة بـ**إزاحة خالصة (مقياس 1.0 — الإطاران نفس المقياس)**: البحث عن الإزاحة
+    # التي تضع أكبر عدد من الأعمدة فوق هوابطها/كمراتها. (الـscaling القديم كان يكبّر x ~2.7% ويُحدث انحرافاً.)
     ccx=(min(colx)+max(colx))/2; ccy=(min(coly)+max(coly))/2
     dcx=(min(dxs)+max(dxs))/2; dcy=(min(dys)+max(dys))/2
-    sx=(max(dxs)-min(dxs))/(max(colx)-min(colx)); sy=(max(dys)-min(dys))/(max(coly)-min(coly))
-    def toC(x,y): return (dcx+(x-ccx)*sx, dcy+(y-ccy)*sy)
+    base_off=(dcx-ccx, dcy-ccy)
+    def _match(ox,oy):
+        n=0
+        for sn,m,x,y in cols:
+            tx,ty=x+ox,y+oy; h=half_mm(m)
+            if min((math.hypot(d[0]-tx,d[1]-ty) for d in drops), default=9e9) < h+500: n+=1
+        return n
+    best=None
+    for ddx in range(-4000,4001,500):
+        for ddy in range(-4000,4001,500):
+            n=_match(base_off[0]+ddx, base_off[1]+ddy)
+            if best is None or n>best[0]: best=(n, base_off[0]+ddx, base_off[1]+ddy)
+    ox0,oy0=best[1],best[2]   # صقل دقيق حول الأفضل
+    for ddx in range(-400,401,100):
+        for ddy in range(-400,401,100):
+            n=_match(ox0+ddx, oy0+ddy)
+            if n>best[0]: best=(n, ox0+ddx, oy0+ddy)
+    offx,offy=best[1],best[2]
+    def toC(x,y): return (x+offx, y+offy)
     out={}
     for sn,m,x,y in cols:
         tx2,ty2=toC(x,y)
@@ -250,8 +286,8 @@ def column_ends(msp, ceil_ssl=-3.85):
         #  • عمود الجدار C: الكمرة ماشية بطول الجدار وتغطّي العمود كله → قاع الكمرة كاملاً.
         #  • غير ذلك: الجزء تحت الكمرة عند قاعها، والباقي عند قاع البلاطة/الهابط (أيّهما أعمق).
         #    الهابط يغطّي العمود كله؛ لو الكمرة أعمق من الهابط فالكمرة تحكم جزءها.
-        if m==WALL_MARK and beam_dep:
-            end=ceil_ssl - beam_dep
+        if m==WALL_MARK:
+            end=ceil_ssl - 0.60   # أعمدة الجدار C: الكمرة بطول الجدار (600) تغطّيها كلها → ‑4.45
         else:
             base_dep=max(0.22, drop_dep)             # الجزء غير المغطّى بالكمرة = بلاطة أو هابط
             if beam_dep > base_dep:
