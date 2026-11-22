@@ -160,21 +160,29 @@ def ramp_column_ends(msp):
         gcx=sum(c[1] for c in group)/len(group)
         cand=[(sx+dxv, sy+dyv) for sx,sy in starters]
         return min(cand, key=lambda p: abs(p[0]-gcx))   # البادئ الأقرب لعنقود المجموعة بالـx
-    # قاع بلاطة الرمب: من ‑7.41 عند البادئ (أرضية ‑7.25) إلى ‑5.23 عند أبعد عمود واقف (قراءة الـproject،
-    # متوسط ميل ~9.4% لأن النص 15% والطرفان 7.5%). الاتجاه يُعيَّر من البادئ (العمود الأقرب = قاع الرمب).
-    soffit_bottom=round(RAMP_FFL-RAMP_THK_S,2)   # ‑7.41
-    RAMP_FAR=-5.23
+    # قاع بلاطة الرمب = منسوب الرمب عند محطة العمود − سماكة البلاطة 0.16، على **بروفايل القطاع المتدرّج**
+    # (7.5٪ أول/آخر 3م، ~15٪ النص) — لا خط مستقيم. المحطة = مسافة العمود من البادئ (العمود الأقرب = محطة 0).
+    PROFILE={  # (محطة من، محطة إلى، منسوب الوش بداية، نهاية) لكل رمب
+        "RAMP04": [(0,3,-7.2,-6.975),(3,22,-6.975,-4.075),(22,25,-4.075,-3.85)],
+        "RAMP03": [(0,3,-7.35,-7.125),(3,23.3,-7.125,-4.075),(23.3,26.3,-4.075,-3.85)],
+    }
+    def ssl_at(station, parts):
+        for a,b,z0,z1 in parts:
+            if station<=b+0.01:
+                f=(station-a)/(b-a) if b>a else 0.0
+                return z0+f*(z1-z0)
+        return parts[-1][3]
     out={}
-    for group in (left, right):
+    for group,key in ((left,"RAMP04"),(right,"RAMP03")):
         if not group: continue
         st=starter_in_cols(group)
         if st is None:   # fallback: البادئ شمال (أعلى y)
             st=(sum(c[1] for c in group)/len(group), max(c[2] for c in group)+1)
         dists=[(c, math.hypot(c[1]-st[0], c[2]-st[1])) for c in group]
-        dmin=min(d for _,d in dists); dmax=max(d for _,d in dists)
+        dmin=min(d for _,d in dists)
         for (m,x,y),d in dists:
-            frac=(d-dmin)/(dmax-dmin) if dmax>dmin else 0.0
-            end=round(soffit_bottom+frac*(RAMP_FAR-soffit_bottom),3)
+            station=(d-dmin)/1000.0                       # محطة العمود على الرمب (العمود الأقرب = 0)
+            end=round(ssl_at(station, PROFILE[key]) - RAMP_THK_S, 3)
             out[(round(x),round(y))]=end
     return out
 
@@ -213,7 +221,7 @@ def column_ends(msp, ceil_ssl=-3.85):
         hw=half_mm(m)                       # نصف أكبر بُعد للعمود (mm)
         # هابط فوق العمود (نطاق يغطّي مستطيل العمود؛ ليبل العمود قد يبعد عن المركز)
         dd=min(((math.hypot(d[0]-tx2,d[1]-ty2),d[2]) for d in drops), default=(9e9,0))
-        drop_dep=(0.32 if dd[1]==320 else (0.35 if dd[1]==350 else 0.40)) if dd[0] < 1600 else 0.0
+        drop_dep=(0.32 if dd[1]==320 else (0.35 if dd[1]==350 else 0.40)) if dd[0] < 1200+hw else 0.0
         # كمرة تلامس مستطيل العمود: المسافة العمودية < نصف بُعد العمود + هامش
         beam_dep=0.0; beam_w=250.0
         for b in beams:
@@ -222,15 +230,19 @@ def column_ends(msp, ceil_ssl=-3.85):
             else: continue
             if pd < hw + 150 and b['D']/1000.0 > beam_dep:   # نصف بُعد العمود بدل 400 ثابتة
                 beam_dep=b['D']/1000.0; beam_w=b.get('W',250)
-        # نهاية العمود = قاع أوطى عنصر فوقه (بلاطة 0.22 / هابط / كمرة)؛ الهابط له الأولوية إن وُجد
-        if drop_dep:
-            end=ceil_ssl - drop_dep
-        elif beam_dep:
-            # الكمرة تاخد جزءاً من العمود فقط (عرض الكمرة/أكبر بُعد للعمود)؛ الباقي يكمل لقاع البلاطة
-            frac=min(1.0, beam_w/(2.0*hw))
-            end=frac*(ceil_ssl-beam_dep) + (1.0-frac)*(ceil_ssl-0.22)
+        # نهاية العمود:
+        #  • عمود الجدار C: الكمرة ماشية بطول الجدار وتغطّي العمود كله → قاع الكمرة كاملاً.
+        #  • غير ذلك: الجزء تحت الكمرة عند قاعها، والباقي عند قاع البلاطة/الهابط (أيّهما أعمق).
+        #    الهابط يغطّي العمود كله؛ لو الكمرة أعمق من الهابط فالكمرة تحكم جزءها.
+        if m==WALL_MARK and beam_dep:
+            end=ceil_ssl - beam_dep
         else:
-            end=ceil_ssl - 0.22
+            base_dep=max(0.22, drop_dep)             # الجزء غير المغطّى بالكمرة = بلاطة أو هابط
+            if beam_dep > base_dep:
+                frac=min(1.0, beam_w/(2.0*hw))        # نسبة تحت الكمرة (تقريب عرض الكمرة/أكبر بُعد)
+                end=frac*(ceil_ssl-beam_dep) + (1.0-frac)*(ceil_ssl-base_dep)
+            else:
+                end=ceil_ssl - base_dep
         out[(round(x),round(y))]=round(end,3)
     # أعمدة الرمب المتوقّفة: تُستبدَل نهايتها بقاع بلاطة الرمب على الميل (أوطى من السقف)
     out.update(ramp_column_ends(msp))
