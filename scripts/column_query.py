@@ -2,8 +2,8 @@
 """
 استعلام ارتفاع/خرسانة أي عمود في لِفت 1 — جاهز للإجابة فوراً عند الإشارة لعمود بسكرين شوت.
 
-يحسب كل عمود من هندسة اللوحة (نفس أدوات الحصر): القاعدة من منطقته (محاذاة التصويت)،
-والنهاية من الهوابط/الكمرات/علامات الرمب. يُخرج:
+يحسب كل عمود من مستطيله المرسوم (column_exact، نفس الحصر): القاعدة تحت كل جزء من المقطع،
+والنهاية من الهوابط/الكمرات (بالمساحة الفعلية)/علامات الرمب بالليدر. يُخرج:
   • output/column_heights.json  — قائمة كل عمود: رقم، مقطع، موضع، قاعدة، نهاية، ارتفاع، حجم، ملاحظة.
   • output/column_heights_map.png — خريطة مرقّمة بنفس تخطيط المسقط (رقم + مقطع + ارتفاع على كل عمود)
     → أطابق عليها السكرين شوت لأحدّد العمود.
@@ -21,31 +21,34 @@ CEIL=-3.85; SLAB=0.22; SOFFIT=round(CEIL-SLAB,2)
 OUT=os.path.join(os.path.dirname(__file__), "..", "output")
 
 def compute(msp):
-    """يعيد قائمة أعمدة لِفت 1 مرقّمة (نفس ترتيب حصر main_elements: أعلى→أسفل ثم يسار→يمين)."""
+    """يعيد قائمة أعمدة لِفت 1 مرقّمة (نفس ترتيب حصر main_elements: أعلى→أسفل ثم يسار→يمين).
+    البداية والنهاية من مستطيل العمود المرسوم (column_exact) — نفس حساب main_elements_concrete."""
+    import column_exact as cx
     plan,sched=ct.collect(msp); stages,_=cc.parse_schedule_stages(sched)
-    bl=cbl.column_bases(msp); base_map={(round(o["x"]),round(o["y"])):(o["base"],o["zone"]) for o in bl}
-    ends=cbl.column_ends(msp, ceil_ssl=CEIL); rs=cbl.ramp_column_ends(msp)
+    L1=cx.LiftOne(msp)
     allc=cc.columns_list(plan)
     cols=[c for c in allc if not c[1].startswith("CORE")]
     cols=cbl.drop_tank_c3(cols, allc)          # C3 داخل الخزان محسوب في الخزان — يُشال من الأعمدة
     cols.sort(key=lambda c:(-c[3], c[2]))
+    rect_of=L1.match(cols, {m: v[0] for m, v in stages.items() if v and v[0]})
     rows=[]
-    for i,(sn,m,x,y) in enumerate(cols,1):
+    for k,(sn,m,x,y) in enumerate(cols):
         wh=stages.get(m,[None])[0] if m in stages else None
-        base,zone=base_map.get((round(x),round(y)),(cbl.MAT_TOP,f"المات {cbl.MAT_TOP}"))
-        end=ends.get((round(x),round(y)),SOFFIT)
-        if (round(x),round(y)) in rs:   # نشوز أعمدة الرمب: تنزل للمات المنخفض ‑8.45
-            base=cbl.RAMP_PROJ_BASE; zone=f"نشوز حتى المات {cbl.RAMP_PROJ_BASE}"
-        ov=cbl.lift1_overrides().get((round(x),round(y)))   # تصحيح معتمَد (قراءة البروجكت)
-        if ov: base,end=ov; zone="حصر معتمَد (البروجكت)"
+        rc=rect_of.get(k)
+        if rc:
+            lv=L1.levels(rc); base,end=float(lv["base"]),float(lv["end"]); ramp=lv["ramp"]
+            zone=" + ".join(f"{th}مم ({b:+.2f}) {f*100:.0f}٪" for b,th,f in sorted(lv["footings"],key=lambda t:-t[2]))
+        else:
+            base,end,ramp,zone=cbl.MAT_TOP,SOFFIT,None,f"المات {cbl.MAT_TOP} (من غير مستطيل مرسوم)"
         h=round(end-base,3)
         if wh: W,D=wh[0]/1000.0,wh[1]/1000.0; v=round(W*D*h,3)
         else: W=D=0; v=0.0
-        key=(round(x),round(y))
-        note=("يقف عند قاع الرمب (To Ramp Level)" if key in rs
-              else ("جدار شمالي W1 — ينتهي عند قاع الكمرة" if m=="C" else ""))
-        rows.append(dict(no=i, mark=m, sec=(f"{wh[0]}x{wh[1]}" if wh else "-"),
-                         x=round(x), y=round(y), base=base, end=round(end,3),
+        if ramp: note=f"يقف عند قاع {ramp} (To Ramp Level)"
+        elif rc and len(lv["tops"])>1: note="كمرة فوق جزء من العمود: "+"، ".join(f"{f*100:.0f}٪ لحد {t:+.2f}" for t,_,f in lv["tops"])
+        elif rc: note=lv["tops"][0][1]
+        else: note=""
+        rows.append(dict(no=k+1, mark=m, sec=(f"{wh[0]}x{wh[1]}" if wh else "-"),
+                         x=round(x), y=round(y), base=round(base,4), end=round(end,4),
                          height=round(h,2), volume=v, zone=zone, note=note))
     return rows
 

@@ -4,9 +4,11 @@
 كل عمود بارتفاعه حسب مكانه (من ظهر قاعدته حتى ما فوقه) — بدون توحيد:
   • القاعدة نفسها ليست ضمن حصر العمود (العمود يبدأ من ظهرها).
   • مارك C (9) = أعمدة الجدار الشمالي W1 → من المات ‑8.45 حتى قاع الكمرة ‑4.45 (الجدار الظاهر 1.70م = W1 بين الأعمدة منفصل).
-  • باقي الأعمدة → من قاعدتها (مات ‑8.45 أو قاعدة مُثخّنة) حتى قاع السقف/الهابط/الكمرة فوقها.
-  • أعمدة الرمب: تقف عند قاع بلاطة الرمب على بروفايل القطاع المتدرّج (نشوز من ‑8.45).
-  • نهايات أعمدة لِفت 1 تُطبَّق من جدول معتمَد (column_overrides_lift1.json) حيث يقصُر الكشف الآلي.
+  • باقي الأعمدة → من وش القاعدة تحت كل جزء من مقطعها (مرجّحة بالمساحة) حتى قاع اللي فوق كل جزء:
+    بلاطة ‑4.07 / هابط ‑4.17 / كمرة لقاعها للجزء اللي تحتها بس (column_exact، من مستطيل العمود المرسوم).
+  • أعمدة الرمب (To Ramp Level، بالليدر): حتى قاع بلاطة الرمب عند محطتها من البادئ على بروفايل القطاع.
+    بدايتها زي أي عمود (وش القاعدة تحتها).
+  • column_overrides_lift1.json = مراجعة بس: السكربت بيطبع أي عمود مختلف عنه (لازم 64/64 مطابق).
   • الأكوار (CORE1/2/3 مقطع 6.36/2.55 − باب) والخزان (L، ارتفاع 3.68) والحوائط (أطوال مرسومة) = عناصر رأسية.
 """
 import argparse, os, collections
@@ -17,6 +19,7 @@ from openpyxl.utils import get_column_letter
 import columns_takeoff as ct
 import concrete_columns_takeoff as cc
 import column_base_levels as cbl
+import column_exact as cx   # بداية/نهاية كل عمود من مستطيله المرسوم (بدل الجدول اليدوي)
 
 CEIL_SSL   = -3.85     # سقف البدروم السفلي (لِفت 1)
 SLAB       = 0.22      # سماكة البلاطة → قاع السقف
@@ -44,33 +47,40 @@ def main():
     stages_by_mark, stage_names = cc.parse_schedule_stages(sched)
     cols = cc.columns_list(plan)
 
-    # منسوب قاعدة كل عمود من منطقته (أداة column_base_levels) — يُستدعى قبل الحصر
-    bl = cbl.column_bases(msp)
-    base_map = {(round(o["x"]), round(o["y"])): (o["base"], o["zone"]) for o in bl}
-    end_map = cbl.column_ends(msp, ceil_ssl=args.ceil)   # نهاية كل عمود: خصم الهابط/الكمرة/البلاطة
-    ramp_ends = cbl.ramp_column_ends(msp)                 # أعمدة 'To Ramp Level' المتوقّفة (نهايتها قاع الرمب)
+    # بداية ونهاية كل عمود من مستطيله المرسوم (column_exact): قاعدة مرجّحة تحت كل جزء من المقطع،
+    # والنهاية تحت اللي فوق كل جزء (بلاطة/هابط/كمرة بالمساحة الفعلية)، وأعمدة الرمب بالليدر وبروفايل القطاع.
+    L1 = cx.LiftOne(msp)
+    sizes = {m: v[0] for m, v in stages_by_mark.items() if v and v[0]}
 
     # ترتيب الأعمدة (أعلى→أسفل ثم يسار→يمين) وترقيمها
     colcols=[c for c in cols if not c[1].startswith("CORE")]
     colcols=cbl.drop_tank_c3(colcols, cols)   # C3 داخل الخزان محسوب في الخزان (T3) — يُشال من الأعمدة
     xs=[c[2] for c in colcols]; xmin,xmax=min(xs),max(xs)
     colcols.sort(key=lambda c:(-c[3], c[2]))
+    rect_of = L1.match(colcols, sizes)
+    if len(rect_of) != len(colcols):
+        print(f"تحذير: {len(colcols)-len(rect_of)} عمود من غير مستطيل مرسوم — هيتحسب من وش المات للبلاطة")
+    ov_tab = cbl.lift1_overrides(); n_ov_bad = 0   # الجدول المعتمَد = مراجعة بس (مش بيتطبّق)
     rows=[]; grand=0.0; n_ramp=0
     per_mark=collections.defaultdict(lambda: dict(n=0, v=0.0))
-    for i,(sn,m,x,y) in enumerate(colcols,1):
+    for k,(sn,m,x,y) in enumerate(colcols):
+        i = k + 1
         wh=stages_by_mark.get(m,[None])[0] if m in stages_by_mark else None
-        base, zone = base_map.get((round(x),round(y)), (BASE_RAFT, f"المات {BASE_RAFT}"))
-        end = end_map.get((round(x),round(y)), soffit)   # منسوب نهاية العمود (قاع الهابط/الكمرة/البلاطة)
         wall = (m=="C")
-        # عمود رمب متوقّف (علامة 'To Ramp Level' باللوحة): نهايته = قاع بلاطة الرمب على الميل (من الأداة)
-        # — لا يكمل للسقف ولا يُخصم منه 16سم (قاع الرمب مخصوم أصلاً في منسوب النهاية).
-        # باقي أعمدة الرمب تكمل كعمود كامل حتى السقف (خصم الكمرة/الهابط من منسوب النهاية فقط).
-        ramp = (round(x),round(y)) in ramp_ends
-        if ramp:   # نشوز: العمود ينزل للمات المنخفض 40سم (وش ‑8.45) لا قاعدته المُثخّنة
-            base = cbl.RAMP_PROJ_BASE; zone = f"نشوز حتى المات {cbl.RAMP_PROJ_BASE}"
-        ov = cbl.lift1_overrides().get((round(x),round(y)))   # تصحيح معتمَد (قراءة البروجكت) — أولوية نهائية
-        if ov: base, end = ov; zone = (zone+" | معتمَد" if ramp else "حصر معتمَد (البروجكت)")
-        h = round(end - base, 3)
+        rc = rect_of.get(k)
+        if rc:
+            lv = L1.levels(rc)
+            base, end = float(lv["base"]), float(lv["end"])
+            ramp = lv["ramp"] is not None
+            zone = " + ".join(f"{th}مم ({b:+.2f}) {f*100:.0f}٪" for b, th, f in sorted(lv["footings"], key=lambda t: -t[2])) if len(lv["footings"]) > 1 \
+                   else f"{lv['footings'][0][1]}مم ({lv['footings'][0][0]:+.2f})"
+            if ramp: zone += f" | {lv['ramp']}"
+        else:
+            base, end, ramp, zone = BASE_RAFT, soffit, False, f"المات {BASE_RAFT}"
+        ov = ov_tab.get((round(x),round(y)))
+        if ov and (abs(ov[0]-base) > 0.002 or abs(ov[1]-end) > 0.002):
+            n_ov_bad += 1; print(f"  مختلف عن الجدول المعتمَد: {m} عند ({round(x)},{round(y)}): {base:+.3f}→{end:+.3f} مقابل {ov[0]:+.3f}→{ov[1]:+.3f}")
+        h = round(end - base, 4)
         if ramp: n_ramp+=1
         if wh:
             W,D=wh[0]/1000.0, wh[1]/1000.0; v=W*D*h
@@ -79,6 +89,7 @@ def main():
         rows.append(dict(no=i, mark=m, sec=(f"{wh[0]}×{wh[1]}" if wh else "—"),
                          base=base, zone=zone, h=h, W=W, D=D, v=v, wall=wall, ramp=ramp, x=x, y=y))
         grand+=v; per_mark[m]["n"]+=1; per_mark[m]["v"]+=v
+    if ov_tab: print(f"مراجعة مع الجدول المعتمَد (column_overrides_lift1.json): {len(colcols)-n_ov_bad}/{len(colcols)} عمود مطابق")
     cores=sorted([m for m in counts if m.startswith("CORE")])
 
     # طباعة
@@ -121,7 +132,9 @@ def main():
     ]
     STARTER_THK2=0.25
     starters=[(nm, L, STARTER_THK2, round(top-base,3), L*STARTER_THK2*(top-base)) for nm,L,base,top in STARTER_SEGS]
-    STARTER_COL_OVERLAP=0.05   # عمود رمب4 داخل البادئ محسوب في الأعمدة → يُخصَم من البادئ (لا يُحسَب مرتين)
+    # الأعمدة الداخلة في شريط البادئ محسوبة في الأعمدة → تُخصَم من البادئ (مساحة التداخل × ارتفاع البادئ)
+    ovl = L1.starter_overlap()
+    STARTER_COL_OVERLAP = ovl.get("RAMP 04", 0.0)*(STARTER_SEGS[0][3]-STARTER_SEGS[0][2]) + ovl.get("RAMP 03", 0.0)*(STARTER_SEGS[1][3]-STARTER_SEGS[1][2])
     v_starter=sum(s[4] for s in starters) - STARTER_COL_OVERLAP
     # الأكوار والخزان على قواعد 1100مم (وش ‑7.75) → الارتفاع حتى قاع السقف = 3.68م
     # مساحات المقطع من تهشير الكور على لوحة COLUMNS&AXES (حوائط 300مم) — مطابقة لحصر الـproject.
@@ -140,7 +153,7 @@ def main():
     # الخزان: حوائط L (16.63) + ضلعا CORE1 (1.35) + العمود الفاصل C3 (0.65) × الارتفاع
     # الارتفاع = من المناسيب ‑7.75 حتى ‑4.07 = 3.68م (بُعد 3700 بالمسقط ليس ارتفاعاً).
     Ht=Hc   # 3.68م
-    TANK_T1=16.63; TANK_T2=1.35; TANK_T3=0.65; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
+    TANK_T1=16.6334; TANK_T2=1.35; TANK_T3=0.65; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
     v_tank=TANK_AREA*Ht
 
     # Excel
@@ -184,16 +197,16 @@ def main():
         st(ws1.cell(rr,5,hrange)); st(ws1.cell(rr,6,round(per_mark[m]["v"],2))); rr+=1
     for j,w in enumerate([10,6,12,16,15,13],1): ws1.column_dimensions[get_column_letter(j)].width=w
 
-    # الأكوار (محسوبة — مساحة المقطع من بلوك ST_WAll، الارتفاع حتى السقف)
+    # الأكوار (محسوبة — مساحة المقطع من تهشير الكور، الارتفاع حتى السقف)
     ws2=wb.create_sheet("الأكوار والخزان"); ws2.sheet_view.rightToLeft=True
     ws2.merge_cells("A1:E1"); st(ws2["A1"],b=True,sz=12,color="FFFFFF",fill=NAVY); ws2["A1"]="الأكوار (سلالم/أسانسير) + الخزان"
-    ws2.merge_cells("A2:E2"); st(ws2.cell(2,1,f"مساحة مقطع جدران الأكوار من بلوك ST_WAll (سماكة 300مم)؛ الارتفاع حتى قاع السقف ({Hc}م). المسقط: K1=K2=CORE3، K3=CORE2، T2=CORE1."),sz=9,fill=GRN,ha="right",wrap=True); ws2.row_dimensions[2].height=28
+    ws2.merge_cells("A2:E2"); st(ws2.cell(2,1,f"مساحة مقطع جدران الأكوار من تهشير الكور في مسقط COLUMNS&AXES (سماكة 300مم)؛ الارتفاع حتى قاع السقف ({Hc}م). المسقط: K1=K2=CORE3، K3=CORE2، T2=CORE1."),sz=9,fill=GRN,ha="right",wrap=True); ws2.row_dimensions[2].height=28
     for j,h in enumerate(["الكور","العدد","مساحة المقطع م²","ارتفاع م","حجم م³"],1): st(ws2.cell(3,j,h),b=True,fill=NAVY,color="FFFFFF")
     rr=4
     for c,n,a,H,V in core_rows:
         st(ws2.cell(rr,1,c),b=True,fill=LT); st(ws2.cell(rr,2,n)); st(ws2.cell(rr,3,a)); st(ws2.cell(rr,4,H)); st(ws2.cell(rr,5,round(V,2))); rr+=1
     st(ws2.cell(rr,1,"مجموع الأكوار"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_cores,2)),b=True,fill=GRN); rr+=2
-    st(ws2.cell(rr,1,f"الخزان T1 (L‑shape 10.51×9.70م، سماكة 350مم، ارتفاع {Ht}م من TANK SECTION، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
+    st(ws2.cell(rr,1,f"الخزان T1 (L‑shape 10.51×9.70م، سماكة 350مم، ارتفاع {Ht}م من المناسيب ‑7.75→‑4.07، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
     for lbl,ar in [("حوائط الخزان T1 (L‑shape)", TANK_T1), ("CORE1 (T2) — كور ملتصق بالخزان، الجدار المشترك محسوب مرة واحدة", TANK_T2), ("العمود/الجدار الفاصل C3", TANK_T3)]:
         st(ws2.cell(rr,1,lbl),fill=LT,ha="right"); st(ws2.cell(rr,3,ar)); st(ws2.cell(rr,4,Ht)); st(ws2.cell(rr,5,round(ar*Ht,2))); rr+=1
     st(ws2.cell(rr,1,"مجموع الخزان"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_tank,2)),b=True,fill=GRN); rr+=1
@@ -210,15 +223,17 @@ def main():
     st(ws3.cell(r3,1,"بادئ الرمب (الطول=عرض الرمب)"),b=True,fill=NAVY,color="FFFFFF"); ws3.merge_cells(f"A{r3}:E{r3}"); r3+=1
     for nm,L,T,H,V in starters:
         st(ws3.cell(r3,1,nm),b=True,fill=LT,ha="right"); st(ws3.cell(r3,2,round(L,2))); st(ws3.cell(r3,3,H)); st(ws3.cell(r3,4,T)); st(ws3.cell(r3,5,round(V,3))); r3+=1
+    if STARTER_COL_OVERLAP:
+        st(ws3.cell(r3,1,"خصم: عمود رمب داخل البادئ (محسوب في الأعمدة)"),fill=LT,ha="right"); ws3.merge_cells(f"A{r3}:D{r3}"); st(ws3.cell(r3,5,-round(STARTER_COL_OVERLAP,3))); r3+=1
     st(ws3.cell(r3,1,"مجموع بادئ الرمب"),b=True,fill=GRN); ws3.merge_cells(f"A{r3}:D{r3}"); st(ws3.cell(r3,5,round(v_starter,3)),b=True,fill=GRN); r3+=1
     for j,w in enumerate([24,9,10,9,10],1): ws3.column_dimensions[get_column_letter(j)].width=w
 
     # ===== الإجمالي =====
     ws5=wb.create_sheet("الإجمالي"); ws5.sheet_view.rightToLeft=True
     ws5.merge_cells("A1:C1"); st(ws5["A1"],b=True,sz=13,color="FFFFFF",fill=NAVY); ws5["A1"]="إجمالي خرسانة العناصر الرأسية — لِفت 1"
-    items=[("الأعمدة (65)", round(grand,2), "كل عمود من ظهر قاعدته حتى قاع السقف"),
+    items=[(f"الأعمدة ({len(rows)})", round(grand,2), "كل عمود من وش قاعدته حتى قاع اللي فوقه (بلاطة/هابط/كمرة/رمب)"),
            ("الحوائط المحيطة (W1+W4)", round(v_walls,2), f"سماكة {WALL_THK}م مُستخرَجة"),
-           ("الأكوار (CORE1/2/3)", round(v_cores,2), f"مقطع من ST_WAll، ارتفاع {Hc}م حتى السقف"),
+           ("الأكوار (CORE1/2/3)", round(v_cores,2), f"مقطع من تهشير الكور، ارتفاع {Hc}م حتى السقف"),
            ("الخزان T1", round(v_tank,2), "L‑shape سماكة 350مم، ارتفاع 3.68م (‑7.75→‑4.07) − الجدار المشترك مع CORE1"),
            ("بادئ الرمب", round(v_starter,3), "الطول=عرض الرمب")]
     for j,h in enumerate(["العنصر","الحجم م³","ملاحظة"],1): st(ws5.cell(2,j,h),b=True,fill=NAVY,color="FFFFFF")
@@ -238,7 +253,7 @@ def main():
     ws4=wb.create_sheet("أسئلة ومُعلَّقات"); ws4.sheet_view.rightToLeft=True
     notes=["① الأعمدة: القاعدة بالمحاذاة بالتصويت (19/19 تقيل داخل قواعده)؛ نهاية كل عمود من جدول معتمَد "
            "(column_overrides_lift1.json) — قراءة دقيقة لكل عمود مُطابَقة للحصر المعتمَد 418.73. أعمدة الجدار C من ‑8.45 حتى قاع الكمرة ‑4.45.",
-           "② أعمدة الرمب: تقف عند قاع بلاطة الرمب على بروفايل القطاع المتدرّج (7.5٪ طرفين/15٪ وسط)، نشوز من ‑8.45.",
+           "② أعمدة الرمب (To Ramp Level بالليدر): تقف عند قاع بلاطة الرمب عند محطتها من البادئ على خط قاع القطاع (7.5٪ طرفين/15٪ وسط)؛ بدايتها من وش القاعدة تحتها زي أي عمود.",
            "③ الأكوار: CORE3 مقطع 6.36م² − باب 0.36×2.30، CORE2 2.55؛ ارتفاع 3.68م (‑7.75→‑4.07). C3 الفاصل محسوب في الخزان ويُشال من الأعمدة.",
            "④ الخزان T1: L‑shape، حوائط 16.63 + CORE1 1.35 + C3 0.65 = 18.63م² × 3.68م = 68.57م³.",
            "⑤ الحوائط: أطوال مرسومة (W1 48.84/W2 45/W3 53.34/W4 شرقي 5 أجزاء) سماكة 0.30م، قاعدة كل جزء من لبشته.",
