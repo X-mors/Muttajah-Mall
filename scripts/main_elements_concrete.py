@@ -154,7 +154,10 @@ def main():
     # الارتفاع = من المناسيب ‑7.75 حتى ‑4.07 = 3.68م (بُعد 3700 بالمسقط ليس ارتفاعاً).
     Ht=Hc   # 3.68م
     TANK_T1=16.6334; TANK_T2=1.35; TANK_T3=0.65; TANK_AREA=TANK_T1+TANK_T2+TANK_T3
-    v_tank=TANK_AREA*Ht
+    # كمرة الأسانسير B2(200×700) تركب آخر 20سم من دراعَي CORE1 → الجزء تحتها يقف عند قاع الكمرة ‑4.55 لا ‑4.07.
+    # الخصم = دراعان × 0.20م × سماكة 0.30م × فرق الارتفاع (0.70 − البلاطة 0.22 = 0.48م).
+    ELEV_BEAM_DEDUCT = round(2 * 0.20 * CORE_THK * (0.70 - args.slab), 4)   # ≈ 0.058 م³
+    v_tank=TANK_AREA*Ht - ELEV_BEAM_DEDUCT
 
     # Excel
     NAVY,BLUE,LT,GREY,GRN,YEL,PUR="1F3864","2E5496","D9E1F2","F2F2F2","E2EFDA","FFF2CC","E6D5F2"
@@ -209,6 +212,7 @@ def main():
     st(ws2.cell(rr,1,f"الخزان T1 (L‑shape 10.51×9.70م، سماكة 350مم، ارتفاع {Ht}م من المناسيب ‑7.75→‑4.07، مُلتصق بـCORE1)"),b=True,fill=NAVY,color="FFFFFF"); ws2.merge_cells(f"A{rr}:E{rr}"); rr+=1
     for lbl,ar in [("حوائط الخزان T1 (L‑shape)", TANK_T1), ("CORE1 (T2) — كور ملتصق بالخزان، الجدار المشترك محسوب مرة واحدة", TANK_T2), ("العمود/الجدار الفاصل C3", TANK_T3)]:
         st(ws2.cell(rr,1,lbl),fill=LT,ha="right"); st(ws2.cell(rr,3,ar)); st(ws2.cell(rr,4,Ht)); st(ws2.cell(rr,5,round(ar*Ht,2))); rr+=1
+    st(ws2.cell(rr,1,"يُخصَم: كمرة الأسانسير B2(200×700) على آخر 20سم من دراعَي CORE1 (الجزء تحتها يقف عند ‑4.55)"),fill=GREY,ha="right"); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,-ELEV_BEAM_DEDUCT),fill=GREY); rr+=1
     st(ws2.cell(rr,1,"مجموع الخزان"),b=True,fill=GRN); ws2.merge_cells(f"A{rr}:D{rr}"); st(ws2.cell(rr,5,round(v_tank,2)),b=True,fill=GRN); rr+=1
     for j,w in enumerate([30,14,12,9,10],1): ws2.column_dimensions[get_column_letter(j)].width=w
 
@@ -234,7 +238,7 @@ def main():
     items=[(f"الأعمدة ({len(rows)})", round(grand,2), "كل عمود من وش قاعدته حتى قاع اللي فوقه (بلاطة/هابط/كمرة/رمب)"),
            ("الحوائط المحيطة (W1+W4)", round(v_walls,2), f"سماكة {WALL_THK}م مُستخرَجة"),
            ("الأكوار (CORE1/2/3)", round(v_cores,2), f"مقطع من تهشير الكور، ارتفاع {Hc}م حتى السقف"),
-           ("الخزان T1", round(v_tank,2), "L‑shape سماكة 350مم، ارتفاع 3.68م (‑7.75→‑4.07) − الجدار المشترك مع CORE1"),
+           ("الخزان T1", round(v_tank,2), "L‑shape سماكة 350مم، ارتفاع 3.68م − الجدار المشترك مع CORE1 − كمرة الأسانسير على دراعَيه"),
            ("بادئ الرمب", round(v_starter,3), "الطول=عرض الرمب")]
     for j,h in enumerate(["العنصر","الحجم م³","ملاحظة"],1): st(ws5.cell(2,j,h),b=True,fill=NAVY,color="FFFFFF")
     r5=3; tot=0.0
