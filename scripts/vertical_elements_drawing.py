@@ -87,8 +87,8 @@ def draw(rows,cores,box,summ,path):
     for nm,v in summ["walls"]: lines.append((f"   {nm}      {v}","sm"))
     lines+=[(f"   مجموع الحوائط       {summ['v_walls']}","it"),
             (f"الأكوار (CORE3×2+CORE2)  {summ['cores']}","it"),
-            (f"الخزان T1 (ارتفاع 3.70م)  {summ['tank']}","it"),
-            (f"بادئ الرمب (INV.B2 250×700) {summ['start']}","it"),
+            (f"الخزان T1 (ارتفاع 3.68م)  {summ['tank']}","it"),
+            (f"بادئ الرمب (حائط 250مم)   {summ['start']}","it"),
             ("",""),(f"الإجمالي                {summ['total']}","tot"),
             (f"+ هدر 5٪               {summ['waste']}","tot"),("",""),
             ("دليل الألوان:","sub"),
