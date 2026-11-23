@@ -42,9 +42,14 @@ def _txt(e):
         return ""
 
 
+def _snap(g):
+    """تقريب الإحداثيات لأقرب 1مم — الرسومات فيها كسور (31331.31 مقابل 31331.36) بتعمل شرائح وهمية بين العناصر."""
+    return shapely.set_precision(g, 1.0)
+
+
 def _poly(pts):
     p = Polygon(pts)
-    return p if p.is_valid else p.buffer(0)
+    return _snap(p if p.is_valid else p.buffer(0))
 
 
 class Substructure:
@@ -116,7 +121,7 @@ class Substructure:
         xs = sorted({round(p[0]) for p in U}); ys = sorted({round(p[1]) for p in U})
         xi0, xi1 = xs[1], xs[2]; yi0 = ys[1]                    # الوش الداخلي للأضلاع الثلاثة
         yN = round(min(p.bounds[1] for p in north + ccols))     # الوش الداخلي لجدار الجار
-        self.D = box(xi0, yi0, xi1, yN)
+        self.D = _snap(box(xi0, yi0, xi1, yN))
         self.D_dims = ((xi1 - xi0) / 1000.0, (yN - yi0) / 1000.0)
         self.outer = outer
         self.north_walls = north; self.north_cols = ccols
@@ -180,7 +185,7 @@ class Substructure:
         self.columns = []
         for r in self.L.rects:
             n, m = by_rect.get(id(r), (None, '?'))
-            self.columns.append(dict(poly=box(r['x0'], r['y0'], r['x1'], r['y1']), no=n, mark=m,
+            self.columns.append(dict(poly=_snap(box(r['x0'], r['y0'], r['x1'], r['y1'])), no=n, mark=m,
                                      w=round(r['x1'] - r['x0']), h=round(r['y1'] - r['y0']), c=(r['cx'], r['cy'])))
 
     def _read_cores_tank(self, CXo, CYo):
@@ -217,7 +222,7 @@ class Substructure:
             nm = [s for s, x, y in labels if env.contains(Point(x, y))]
             nm = nm[0] if nm else 'CORE?'
             dr = [d for d in doors if d.distance(p) < 1]
-            solid = unary_union([p] + dr)               # تحت منسوب الردم الحائط مصمت تحت الباب
+            solid = _snap(unary_union([p] + dr))               # تحت منسوب الردم الحائط مصمت تحت الباب
             self.cores.append(dict(name=nm, poly=p, solid=solid, doors=dr))
         self.cores.sort(key=lambda c: (c['name'], -c['poly'].centroid.y))
         cnt = collections.Counter(c['name'] for c in self.cores); seen = collections.Counter()
@@ -231,7 +236,7 @@ class Substructure:
     def _read_starters(self):
         self.starters = []
         for name, R in CX.RAMP.items():
-            p = box(R['x0'], R['y_start'] - R['wall_t'], R['x1'], R['y_start'])
+            p = _snap(box(R['x0'], R['y_start'] - R['wall_t'], R['x1'], R['y_start']))
             top = CX._interp(R['soffit'], R['wall_t'])        # قاع بلاطة الرمب فوق البادئ
             self.starters.append(dict(name=f"بادئ {name}", ramp=name, poly=p, top=round(top, 4), R=R))
 

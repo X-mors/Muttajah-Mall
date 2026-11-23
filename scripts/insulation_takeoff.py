@@ -1,111 +1,155 @@
 # -*- coding: utf-8 -*-
 """
-البند 2: حصر العزل بالدهان (م²) — Muttajah Mall، البدروم السفلي. كله حتى منسوب الردم ‑7.35 بالظبط.
-يقرأ من اللوحة (DXF) على الشبكة الموحّدة (column_exact.PLAN_ORIGIN) ومستطيلات الأعمدة من column_exact.
+البند 2: حصر العزل بالدهان (م²) — Muttajah Mall، البدروم السفلي. كله لحد منسوب الردم بالظبط. (v2 — من اللوحة)
 
-=================  المناسيب والفرضيات (مقروءة من اللوحة)  =================
-• منسوب الردم (نهاية العزل) = ‑7.35. وش المات ‑8.45. قواعد مُثخّنة وشّها ‑8.15/‑7.85/‑7.75/‑7.55/‑7.35.
-• أنواع الأسطح (كل نوع منفصل):
-  1) أفقي: ظهر اللبشة والقواعد (= مساحة اللبشة − بصمات العناصر الرأسية؛ لا عزل تحت عنصر رأسي).
-  2) رقاب الأعمدة: محيط كل عمود × (‑7.35 − وش قاعدته).
-  3) الأكوار: جدرانها من كل الجوانب (الوجهان) × الارتفاع في مدى الردم.
-  4) الجدار المحيط: الوش الداخلي فقط × الارتفاع (الخارجي ملاصق للأرض).
-  5) الخزان: الوش الخارجي فقط × الارتفاع (من الداخل لا يُعزَل).
-  6) بادئ الرمب: وجهاه × الارتفاع.
-• الخزان من الداخل لا يُعزَل. تُخصَم بصمات الأعمدة/الحوائط من ظهر اللبشة (لا عزل تحتها).
-
-⚠️ قيد الإكمال (تحتاج مخططات القطاع/التفصيل): جوانب القواعد والسملات والهوابط وحفر الأسانسير (أفقي رأسي)،
-   وفتحات أبواب الأكوار أسفل منسوب الردم. ومحيطات الأكوار/الخزان هنا تقريبية (مساحة المقطع ÷ السماكة) لحين استخراج الحدود المرسومة.
+دهان → مفيش ركوب ومفيش خصم سُمك من الردم.
+النموذج: substructure_model.Substructure (نفس الشبكة ونفس العناصر اللي في حصر الردم).
+  1) أفقي: ظهر المات + القواعد + السملات − بصمات الأعمدة/الأكوار/الخزان/البادئ (مفيش عزل تحت عنصر رأسي، ولا جوه الخزان).
+  2) جوانب القواعد والسملات: كل حافة من وش المنطقة الأوطى جنبها لحد ظهرها (اللي ملاصق لعنصر رأسي أو برّه الحدود مش بيتحسب).
+  3) رقاب الأعمدة: محيط كل عمود المكشوف × (منسوب الردم − الوش جنبه)، مقسوم عند تغيّر الوش.
+  4) الأكوار: كل الجوانب (برّه وجوّه) — حدودها المرسومة؛ الحائط تحت باب السلالم مصمت (الباب يبدأ ‑7.25).
+  5) الجدار المحيط: الوش الداخلي (الأضلاع الثلاثة + جدار الجار 1.70م وأعمدة C فيه).
+  6) الخزان: الوش الخارجي بس (من حدوده المرسومة). جوّه مش بيتعزل.
+  7) بادئا الرمب: كل الأوجه المكشوفة + قاع بلاطة رمب 03 اللي تحت منسوب الردم.
+  8) أبواب أكوار السلالم: الجزء تحت منسوب الردم يتخصم — الباب يبدأ 10سم فوق ‑7.35 → الخصم صفر.
+بنود ناقصة (حفر الصرف/الأسانسير/هوابط) في ورقة لوحدها بأثرها، مش داخلة في الرقم.
+الاستخدام: python insulation_takeoff.py [--no-review]
 """
-import sys, os, collections
-import ezdxf, raft_footings as RF, concrete_columns_takeoff as cc, columns_takeoff as ct, column_exact as CX
-import backfill_takeoff as BF
+import sys, os, argparse, logging
+import ezdxf
+import concrete_columns_takeoff as cc
+import substructure_model as SM, substructure_calc as SC, substructure_xl as X
+import foundation_review as FR
 
-OUT=os.path.join(os.path.dirname(__file__), "..", "output")
-FILL=-7.35; MAT_TOP=-8.45; WALL_THK=0.30; CORE_THK=0.30; TANK_THK=0.35; WASTE=1.05
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "output")
+WASTE = 1.05
+T_AR = [('h_mat', "أفقي: ظهر المات العام ‑8.45"), ('h_foot', "أفقي: ظهر القواعد المُثخّنة"),
+        ('h_beam', "أفقي: ظهر السملات"), ('s_foot', "جوانب القواعد"), ('s_beam', "جوانب السملات"),
+        ('col', "رقاب الأعمدة"), ('core', "الأكوار (كل الجوانب)"), ('perim', "الجدار المحيط (الوش الداخلي)"),
+        ('tank', "الخزان (الوش الخارجي بس)"), ('starter', "بادئا الرمب (كل الأوجه المكشوفة)"),
+        ('ramp_soffit', "قاع بلاطة رمب 03 تحت منسوب الردم"), ('doors', "خصم أبواب أكوار السلالم تحت منسوب الردم")]
 
-def footing_sides(msp):
-    """جوانب القواعد المُثخّنة = محيط كل قاعدة × ارتفاع خطوتها فوق المات ‑8.45 (كلها في مدى الردم)."""
-    import math
-    RX,RY=CX.PLAN_ORIGIN['RAFT']
-    fts=RF.assign_thickness(RF.collect_footings(msp), RF.collect_thickness_bubbles(msp))
-    tot=0.0
-    for f in fts:
-        pts=[(x-RX,y-RY) for x,y in f['pts']]; P=0.0
-        for i in range(len(pts)):
-            x1,y1=pts[i]; x2,y2=pts[(i+1)%len(pts)]; P+=math.hypot(x2-x1,y2-y1)/1000.0
-        tot+=P*(f['top']-MAT_TOP)
-    return round(tot,2)
 
-def columns_surf(msp):
-    """بصمة الأعمدة (تُخصَم من الأفقي) + رقاب الأعمدة الرأسية (محيط × ارتفاع)."""
-    L=CX.LiftOne(msp); plan,sched=ct.collect(msp); stages,_=cc.parse_schedule_stages(sched)
-    cols=[c for c in cc.columns_list(plan) if not c[1].startswith('CORE')]
-    sz={m:stages[m][0] for m in stages}
-    match=L.match([(sn,m,x,y) for sn,m,x,y in cols], sz)
-    foot=0.0; vert=0.0; n=0
-    for i,(sn,m,x,y) in enumerate(cols):
-        if i not in match: continue
-        r=match[i]; base=L.levels(r)['base']
-        w=(r['x1']-r['x0'])/1000.0; h=(r['y1']-r['y0'])/1000.0; foot+=w*h
-        if base<FILL-1e-6: vert+=2*(w+h)*(FILL-base); n+=1
-    return round(foot,2), round(vert,2), n
+def hand_checks(M, I):
+    F = M.FILL; out = []
+    v = [r for r in I['vert'] if r['name'] == 'CORE3 (شمالي)'][0]
+    x0, y0, x1, y1 = v['ref']['poly'].bounds; W, H = (x1 - x0) / 1000, (y1 - y0) / 1000
+    out.append(("CORE3 الشمالي — برّه وجوّه", f"[2×({W:.1f}+{H:.1f}) + 2×({W-0.6:.1f}+{H-0.6:.1f})] × ({F:+.2f} − (‑7.75))",
+                (2 * (W + H) + 2 * (W - 0.6 + H - 0.6)) * (F + 7.75), v['A']))
+    e = [p for p in I['perim'] if p['name'] == 'W4 شرقي'][0]
+    L700 = sum((f['poly'].bounds[3] - f['poly'].bounds[1]) / 1000 for f in M.footings if f['th'] == 700)
+    Le = M.D_dims[1]
+    out.append(("الجدار الشرقي W4 — الوش الداخلي", f"({Le:.2f} − {L700:.1f}) × 1.10 + {L700:.1f} × 0.80 (جزء قواعد 700 وشّها ‑8.15)",
+                (Le - L700) * 1.10 + L700 * 0.80, e['A']))
+    c = [r for r in I['vert'] if r['name'].startswith('C8 #44')][0]
+    x0, y0, x1, y1 = c['ref']['poly'].bounds; w, h = (x1 - x0) / 1000, (y1 - y0) / 1000
+    out.append(("رقبة العمود C8 #44", f"2×({w:.2f}+{h:.2f}) × 0.40", 2 * (w + h) * 0.40, c['A']))
+    b = [s for s in I['sides'] if s['name'] == 'S(300×1500)'][0]
+    bl = [x for x in M.beams if x['name'] == 'S(300×1500)'][0]['L']
+    out.append(("جوانب السمل S(300×1500) (بين قاعدتين 1500 بنفس الظهر)", f"2 × {bl:.2f} × 1.10", 2 * bl * 1.10, b['A']))
+    return out
 
-def main():
-    doc=ezdxf.readfile(cc.DEFAULT_DXF); msp=doc.modelspace()
-    raft,_=BF.raft_zones(msp)
-    col_foot, col_vert, ncn = columns_surf(msp)
-    # بصمات العناصر الرأسية (تُخصَم من الأفقي)
-    wall_segs=[("W1",48.835,-8.45),("W2",45.0,-8.45),("W3",53.335,-8.45),
-               ("W4‑1",14.1,-8.45),("W4‑2",6.0,-8.15),("W4‑3",4.85,-8.45),("W4‑4",6.0,-8.15),("W4‑5",14.05,-8.45)]
-    wall_foot=sum(L*WALL_THK for _,L,_ in wall_segs)
-    core_foot=6.36*2+2.55; tank_foot=16.6334+1.35+0.65; start_foot=(3.9+4.2)*0.25
-    horiz=round(raft-(col_foot+wall_foot+core_foot+tank_foot+start_foot),2)
-    # رأسي
-    perim_wall=round(sum(L*(FILL-b) for _,L,b in wall_segs),2)                 # الوش الداخلي للجدار المحيط
-    cores_v=round((2*(6.36/CORE_THK)*(FILL-(-7.75)))*2 + 2*(2.55/CORE_THK)*(FILL-(-7.75)),2)  # الأكوار الوجهان
-    tank_outer=round(40.4*(FILL-(-7.75)),2)                                    # محيط خارجي ≈40.4م (L 10.51×9.70) × الارتفاع
-    starter_v=round(2*(3.9+4.2)*(FILL-MAT_TOP),2)                              # بادئ الرمب وجهاه
-    fside=footing_sides(msp)
-    surfaces=[("أفقي: ظهر اللبشة والقواعد (− بصمات العناصر)", horiz),
-              ("جوانب القواعد المُثخّنة (خطوتها فوق المات)", fside),
-              ("رأسي: رقاب الأعمدة", col_vert),
-              ("رأسي: الأكوار (الوجهان)", cores_v),
-              ("رأسي: الجدار المحيط (الوش الداخلي)", perim_wall),
-              ("رأسي: الخزان (الوش الخارجي)", tank_outer),
-              ("رأسي: بادئ الرمب (الوجهان)", starter_v)]
-    total=round(sum(v for _,v in surfaces),2)
-    print("البند 2: حصر العزل بالدهان — البدروم السفلي (حتى منسوب الردم ‑7.35)")
-    print(f"اللبشة الكلية {raft:.1f} م² − بصمات (أعمدة {col_foot} + حوائط {round(wall_foot,1)} + أكوار {round(core_foot,1)} + خزان {round(tank_foot,1)} + بادئ {round(start_foot,2)})")
-    for nm,v in surfaces: print(f"  {nm}: {v} م²")
-    print(f"\nإجمالي العزل = {total} م² | +هدر 5٪ = {round(total*WASTE,2)} م²")
-    print("ملاحظات: أبواب الأكوار تبدأ ‑7.25 (10سم فوق قاعدة 1.50 وشّها ‑7.35) = فوق منسوب الردم → لا خصم من عزل مدى الردم.")
-    print("غير موجود في اللوحة (لم يُفترَض): السملات (tie beams)، حفر الأسانسير، الهوابط السفلية — لا مسقط/منسوب لها في الـDXF.")
-    # Excel
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        from openpyxl.utils import get_column_letter
-        NAVY,LT,GRN,GREY,YEL="1F3864","D9E1F2","E2EFDA","F2F2F2","FFF2CC"
-        bd=Border(*[Side(style="thin",color="BFBFBF")]*4)
-        def st(c,*,b=False,sz=11,color="000000",fill=None,ha="center",wrap=False):
-            c.font=Font(bold=b,size=sz,color=color); c.alignment=Alignment(ha,"center",wrap_text=wrap)
-            if fill:c.fill=PatternFill("solid",fgColor=fill)
-            c.border=bd
-        wb=Workbook(); ws=wb.active; ws.title="العزل"; ws.sheet_view.rightToLeft=True
-        ws.merge_cells("A1:C1"); st(ws["A1"],b=True,sz=13,color="FFFFFF",fill=NAVY); ws["A1"]="البند 2: حصر العزل بالدهان — البدروم السفلي"
-        ws.merge_cells("A2:C2"); st(ws.cell(2,1,"كله حتى منسوب الردم ‑7.35. الأفقي = ظهر اللبشة − بصمات العناصر الرأسية. الرأسي = محيط كل عنصر × الارتفاع. الخزان من الخارج فقط. (محيطات الأكوار/الخزان تقريبية لحين استخراج الحدود المرسومة.)"),sz=9,fill=GRN,ha="right",wrap=True); ws.row_dimensions[2].height=40
-        for j,h in enumerate(["نوع السطح","المساحة م²",""],1): st(ws.cell(3,j,h),b=True,fill=LT)
-        r=4
-        for nm,v in surfaces: st(ws.cell(r,1,nm),ha="right",fill=LT); ws.merge_cells(f"A{r}:A{r}"); st(ws.cell(r,2,v)); r+=1
-        st(ws.cell(r,1,"إجمالي العزل (صافي)"),b=True,fill=GRN); st(ws.cell(r,2,total),b=True,fill=GRN); r+=1
-        st(ws.cell(r,1,"+ هدر 5٪"),b=True,fill=GREY); st(ws.cell(r,2,round(total*WASTE,2)),b=True,fill=GREY); r+=2
-        st(ws.cell(r,1,"الأبواب تبدأ ‑7.25 (فوق الردم) → لا خصم. غير موجود باللوحة (لم يُفترَض): السملات، حفر الأسانسير، الهوابط السفلية."),ha="right",fill=YEL,wrap=True); ws.merge_cells(f"A{r}:C{r}"); ws.row_dimensions[r].height=30
-        for j,w in enumerate([44,14,4],1): ws.column_dimensions[get_column_letter(j)].width=w
-        os.makedirs(OUT,exist_ok=True); p=os.path.join(OUT,"حصر العزل بالدهان - البدروم السفلي.xlsx")
-        wb.save(p); print("SAVED:",p)
-    except Exception as e:
-        import traceback; print("Excel skip:",e); traceback.print_exc()
 
-if __name__=="__main__":
-    sys.stdout.reconfigure(encoding="utf-8",errors="replace"); main()
+def write_excel(M, I, pend, hc, path):
+    wb = X.Workbook(); t = I['totals']
+    s = X.Sheet(wb, "الملخص", [48, 16, 30], first=True)
+    s.title("البند 2: حصر العزل بالدهان — البدروم السفلي (Muttajah Mall)")
+    s.note(f"كله لحد منسوب الردم {M.FILL:+.2f} بالظبط ({M.fill_src}). دهان: مفيش ركوب ولا خصم سُمك من الردم.")
+    s.note("نفس حدود الردم والعناصر اللي في حصر الردم (من الحدود المرسومة). الخزان من جوّه مش بيتعزل. مفيش عزل تحت عنصر رأسي.")
+    s.head(["نوع السطح", "م²", "ورقة التفصيل"])
+    sheet_of = {'h_mat': "الأفقي", 'h_foot': "الأفقي", 'h_beam': "الأفقي", 's_foot': "الجوانب", 's_beam': "الجوانب",
+                'col': "العناصر الرأسية", 'core': "العناصر الرأسية", 'perim': "الجدار المحيط", 'tank': "العناصر الرأسية",
+                'starter': "العناصر الرأسية", 'ramp_soffit': "العناصر الرأسية", 'doors': "العناصر الرأسية"}
+    for k, nm in T_AR:
+        s.row([nm, t[k], sheet_of[k]])
+    s.total("إجمالي العزل (صافي)", I['total'], col=2)
+    s.total("+ هدر 5٪", I['total'] * WASTE, col=2, fill=X.GREY)
+    s.gap()
+    s.head(["تجميع", "م²", ""])
+    s.row(["أفقي (ظهر المات + القواعد + السملات)", t['h_mat'] + t['h_foot'] + t['h_beam'], ""])
+    s.row(["جوانب (القواعد + السملات)", t['s_foot'] + t['s_beam'], ""])
+    s.row(["رأسي (رقاب + أكوار + محيط + خزان + بادئ + قاع رمب)", t['col'] + t['core'] + t['perim'] + t['tank'] + t['starter'] + t['ramp_soffit'], ""])
+    s.note("ظهر قاعدتي الـ1500 وسمل S(300×1500) على منسوب الردم نفسه ‑7.35 — محسوبين في الأفقي (ظهر قواعد/سملات). "
+           "بنود مش داخلة لأن قطاعها مش في اللوحة: ورقة «بنود ناقصة».", fill=X.YEL)
+    # ---- الأفقي
+    s = X.Sheet(wb, "الأفقي", [6, 30, 10, 12, 14, 12, 18])
+    s.title("الأسطح الأفقية: ظهر كل منطقة − بصمات العناصر الرأسية والخزان")
+    s.head(["#", "المنطقة", "الظهر م", "المساحة م²", "بصمات مخصومة م²", "المعزول م²", "الموقع (م من 01/A)"])
+    for i, h in enumerate(I['horiz'], 1):
+        s.row([i, h['name'], h['top'], h['A'], h['A_obs'], h['Anet'], h['loc']])
+    s.total("مجموع الأفقي", t['h_mat'] + t['h_foot'] + t['h_beam'], col=6)
+    # ---- الجوانب
+    s = X.Sheet(wb, "الجوانب", [6, 12, 22, 10, 14, 16, 12, 18])
+    s.title("جوانب القواعد والسملات: الحافة المكشوفة × (ظهرها − وش اللي جنبها)")
+    s.note("بيتحسب من العنصر الأعلى بس (مفيش تكرار بين قاعدة وسمل ملاصقين). الحافة الملاصقة لعمود/كور/خزان أو للجدار المحيط مش بتتحسب.")
+    s.head(["#", "النوع", "العنصر", "الظهر م", "الطول المكشوف م", "الارتفاع م (من/إلى)", "المساحة م²", "الموقع (م من 01/A)"])
+    for i, r in enumerate(I['sides'], 1):
+        s.row([i, "قاعدة" if r['kind'] == 'footing' else "سمل", r['name'], r['top'], r['L'],
+               f"{r['rng'][0]:.2f} – {r['rng'][1]:.2f}", r['A'], r['loc']])
+    s.total("جوانب القواعد", t['s_foot'], col=7, fill=X.GREY)
+    s.total("جوانب السملات", t['s_beam'], col=7, fill=X.GREY)
+    # ---- العناصر الرأسية
+    s = X.Sheet(wb, "العناصر الرأسية", [6, 12, 30, 14, 16, 12, 18])
+    s.title("الأوجه الرأسية المعزولة: المحيط المكشوف × (منسوب الردم − الوش جنبه)")
+    s.note("الأرقام نفس أرقام ورقة الخصومات في حصر الردم ولوحة المراجعة. الأعمدة بترقيم حصر العناصر الرأسية.")
+    s.head(["#", "النوع", "العنصر", "المحيط المكشوف م", "الارتفاع م (من/إلى)", "المساحة م²", "الموقع (م من 01/A)"])
+    kind_ar = {'column': 'رقبة عمود', 'core': 'كور', 'tank': 'خزان (برّه)', 'starter': 'بادئ رمب'}
+    for i, r in enumerate(I['vert'], 1):
+        nm = r['name'] + (f" ({r['ref']['w']}×{r['ref']['h']})" if r['kind'] == 'column' and r['ref'] else "")
+        s.row([i, kind_ar[r['kind']], nm, r['P'], f"{r['rng'][0]:.2f} – {r['rng'][1]:.2f}", r['A'], r['loc']])
+    for k in ('col', 'core', 'tank', 'starter'):
+        s.total(dict(T_AR)[k], t[k], col=6, fill=X.GREY)
+    s.gap()
+    for k, (V, A, L) in I['wedge'].items():
+        if A > 0:
+            s.row(["", "قاع رمب", f"{k}: قاع البلاطة تحت {M.FILL:+.2f} لمسافة {L:.2f}م بعد البادئ (ميل 7.5٪)", "", "", A, ""])
+    s.gap()
+    s.head(["", "باب", "الكور", "عرض الباب م", "بداية الباب م", "الجزء تحت الردم م", "الخصم م²"])
+    for d in I['doors']:
+        s.row(["", "باب سلالم", d['core'], d['w'], d['sill'], d['h'], -d['A']])
+    s.note(f"الباب يبدأ {I['sill']:+.2f} = 10سم فوق وش قاعدة الـ1500 ({M.FILL:+.2f}) → فوق منسوب الردم، فالخصم صفر والحائط تحته محسوب مصمت.", fill=X.YEL)
+    # ---- الجدار المحيط
+    s = X.Sheet(wb, "الجدار المحيط", [36, 14, 16, 12])
+    s.title("الوش الداخلي للجدار المحيط: الطول المكشوف × (منسوب الردم − الوش جنبه)")
+    s.head(["الجزء", "الطول م", "الارتفاع م (من/إلى)", "المساحة م²"])
+    for p in I['perim']:
+        s.row([p['name'], p['L'], f"{p['rng'][0]:.2f} – {p['rng'][1]:.2f}", p['A']])
+    s.total("مجموع الجدار المحيط", t['perim'], col=4)
+    s.note("الطول المكشوف = طول الضلع ناقص الملاصق لعنصر رأسي (بادئ رمب 04 على الغربي). الشرقي فيه جزءين 6م على قواعد 700 (ارتفاع 0.80).", fill=X.GREY)
+    # ---- مراجعة يدوية
+    s = X.Sheet(wb, "مراجعة يدوية", [44, 52, 12, 12, 10])
+    s.title("مراجعة يدوية — حساب مستقل من الأبعاد المرسومة مقابل السكريبت")
+    s.head(["العنصر", "الحساب اليدوي", "يدوي", "السكريبت", "الفرق"])
+    for nm, f, a, b in hc:
+        s.row([nm, f, a, b, a - b])
+    # ---- بنود ناقصة
+    s = X.Sheet(wb, "بنود ناقصة", [24, 26, 40, 40, 30, 30])
+    s.title("بنود مرسومة من غير قطاع أو مش مرسومة — مش داخلة في الرقم (ما افترضتش)")
+    s.head(["البند", "المكان", "الموجود في اللوحة", "الناقص", "الأثر على الردم", "الأثر على العزل لو اتأكد"])
+    for p in pend:
+        s.row([p['item'], p['where'], p['known'], p['missing'], p['fill'], p['ins']])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    wb.save(path)
+    return path
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(); ap.add_argument("--no-review", action="store_true")
+    a = ap.parse_args(argv)
+    logging.disable(logging.WARNING)
+    doc = ezdxf.readfile(cc.DEFAULT_DXF)
+    M = SM.Substructure(doc.modelspace())
+    I = SC.insulation(M); pend = SC.pending_items(M); hc = hand_checks(M, I)
+    print(f"البند 2: العزل بالدهان — لحد منسوب الردم {M.FILL:+.2f}")
+    for k, nm in T_AR: print(f"  {nm}: {I['totals'][k]:.2f}")
+    print(f"إجمالي العزل {I['total']:.2f} م² | +هدر 5٪ = {I['total']*WASTE:.2f}")
+    for nm, f, x, y in hc: print(f"  يدوي: {nm}: {x:.3f} | سكريبت {y:.3f}")
+    p = write_excel(M, I, pend, hc, os.path.join(OUT, "حصر العزل بالدهان - البدروم السفلي.xlsx")); print("SAVED:", p)
+    if not a.no_review:
+        print("SAVED:", FR.insulation_png(M, I, os.path.join(OUT, "مراجعة العزل - البدروم السفلي.png")))
+        for f in FR.insulation_dxf(doc, M, I, os.path.join(OUT, "مراجعة العزل - البدروم السفلي.dxf")): print("SAVED:", f)
+    return M, I
+
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace"); main()

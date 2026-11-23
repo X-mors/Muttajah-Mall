@@ -1,138 +1,161 @@
 # -*- coding: utf-8 -*-
 """
-البند 1: حصر الردم الداخلي (م³) — Muttajah Mall، البدروم السفلي.
-يقرأ من اللوحة (DXF) على الشبكة الموحّدة (column_exact.PLAN_ORIGIN) ويستخدم مستطيلات الأعمدة من column_exact.
+البند 1: حصر الردم الداخلي (م³) — Muttajah Mall، البدروم السفلي. (v2 — كل الجيومتري من اللوحة)
 
-=================  المناسيب والفرضيات (مقروءة من اللوحة)  =================
-• منسوب الردم (FILL) = أعلى قاعدة سمكها 1.50م = ‑7.35 (= قاع التأسيس ‑8.85 + 1.50).
-• قاع التأسيس (formation) = ‑8.85. وش المات العام = ‑8.45 (مات 40سم).
-• مناطق وش اللبشة (مقروءة من R.C. footing + بابلات السماكة):
-    المات ‑8.45 | قواعد مُثخّنة وشّها ‑8.15/‑7.85/‑7.75/‑7.55/‑7.35 (سماكة 700/1000/1100/1300/1500).
-• الحدود: الوش الداخلي للجدار المحيط (3 أضلاع عالية + ضلع جدار الجار 1.70م). الردم يملأ من وش اللبشة
-  في كل منطقة حتى ‑7.35، ويُخصَم منه كل الخرسانة الواقعة في هذا المدى (قواعد/رقاب أعمدة/حوائط/أكوار/خزان/بادئ رمب).
-
-الحجم = Σ (مساحة المنطقة × (‑7.35 − وش اللبشة فيها)) − خرسانة العناصر الرأسية في مدى الردم.
-المدموك = هذا الحجم. التوريد = × معامل انضغاط (COMPACTION، افتراضي 1.20 — يُعدَّل من المهندس).
-
-⚠️ قيد الإكمال (تُضاف لاحقاً بعد تأكيد موقعها في اللوحة): السملات (tie beams)، حفر الأسانسير، الهوابط السفلية، سمك العزل.
+=================  المصدر والطريقة  =================
+النموذج: substructure_model.Substructure (الشبكة الموحّدة column_exact.PLAN_ORIGIN، نقطة 01/A).
+• منسوب الردم = بطاقة المنسوب المرسومة جوه القاعدة اللي سمكها 1500 (‑7.35m S.S.L) = ‑8.85 + 1.50.
+• حدود الردم = الوش الداخلي للجدار المحيط (3 أضلاع عالية + جدار الجار 1.70م وأعمدة C فيه) — الجدار نفسه برّه الحدود.
+• الحجم القائم = Σ مساحة كل منطقة وش لبشة جوه الحدود × (منسوب الردم − وشّها)
+      المات ‑8.45 (شامل مكان السملات) | قواعد 700/1000/1100/1300/1500 → ‑8.15/‑7.85/‑7.75/‑7.55/‑7.35
+• يُخصَم (كل عنصر من حدوده المرسومة، وارتفاعه من الوش اللي تحته بالظبط):
+      السملات 17 (الظاهر فوق المات) | رقاب الأعمدة | الأكوار (الحائط تحت باب السلالم مصمت تحت ‑7.25)
+      | الخزان (الحوائط + الداخل: مياه، مفيش ردم) | بادئا الرمب | بلاطة رمب 03 اللي قاعها تحت منسوب الردم.
+• الجدار المحيط مفيش منه خصم (الحدود هي وشّه الداخلي).
+• عناصر مرسومة من غير قطاع (حفر الصرف) أو مش مرسومة (حفر الأسانسير، هوابط سفلية) → ورقة "بنود ناقصة" بأثرها، مش داخلة في الرقم.
+الصافي = الردم المدموك في مكانه. + هدر 5٪. (سطر مرجعي للتوريد بمعامل انضغاط 1.20 — يتعدّل من المهندس.)
+الاستخدام: python backfill_takeoff.py [--no-review]
 """
-import sys, os, collections
-import ezdxf, raft_footings as RF, concrete_columns_takeoff as cc, columns_takeoff as ct, column_exact as CX
+import sys, os, argparse, logging, shutil
+import ezdxf
+import concrete_columns_takeoff as cc
+import substructure_model as SM, substructure_calc as SC, substructure_xl as X
+import foundation_review as FR
 
-OUT=os.path.join(os.path.dirname(__file__), "..", "output")
-FILL=-7.35; MAT_TOP=-8.45; WALL_THK=0.30; CORE_THK=0.30
-COMPACTION=1.20; WASTE=1.05
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "output")
+WASTE = 1.05; COMPACTION = 1.20
+KIND_AR = {'tie_beams': "السملات (الظاهر فوق المات)", 'column': "رقاب الأعمدة", 'core': "الأكوار",
+           'tank': "الخزان T1 (الحوائط + الداخل)", 'starter': "بادئا الرمب", 'ramp_slab': "بلاطة رمب 03 تحت منسوب الردم"}
 
-def poly_area(pts):
-    a=0.0
-    for i in range(len(pts)):
-        x1,y1=pts[i]; x2,y2=pts[(i+1)%len(pts)]; a+=x1*y2-x2*y1
-    return abs(a)/2/1e6
 
-def raft_zones(msp):
-    """مناطق وش اللبشة: {وش: مساحة م²}. المات = اللبشة الكلية − القواعد المُثخّنة."""
-    RX,RY=CX.PLAN_ORIGIN['RAFT']
-    fts=RF.assign_thickness(RF.collect_footings(msp), RF.collect_thickness_bubbles(msp))
-    zt=collections.defaultdict(float)
-    for f in fts: zt[round(f['top'],2)]+=poly_area([(x-RX,y-RY) for x,y in f['pts']])
-    allp=[]
-    for e in msp.query('LWPOLYLINE'):
-        if e.dxf.layer!='R.C. footing': continue
-        try: pts=[(p[0]-RX,p[1]-RY) for p in e.get_points('xy')]
-        except: continue
-        if len(pts)>=4 and -15000<min(p[0] for p in pts)<60000: allp.append(poly_area(pts))
-    raft=max(allp) if allp else 0.0
-    zt[MAT_TOP]+=raft-sum(zt.values())   # المات = الكلية − المُثخّنة
-    return raft, dict(sorted(zt.items()))
+def hand_checks(M, B):
+    """مراجعة يدوية من أبعاد مرسومة مباشرة (مش من خوارزمية السكريبت)."""
+    F = M.FILL; out = []
+    W, H = M.D_dims
+    out.append(("مساحة حدود الردم", f"{W:.3f} × {H:.3f} (الوش الداخلي للجدار)", W * H,
+                sum(z['A'] for z in B['zones'])))
+    col = [o for o in B['obs'] if o['name'].startswith('C8 #44')][0]
+    x0, y0, x1, y1 = col['poly'].bounds
+    w, h = (x1 - x0) / 1000, (y1 - y0) / 1000
+    out.append(("رقبة العمود C8 #44 (على الزون الأوسط ‑7.75)", f"{w:.2f} × {h:.2f} × ({F:+.2f} − (‑7.75))", w * h * (F + 7.75), col['V']))
+    core = [o for o in B['obs'] if o['name'] == 'CORE3 (شمالي)'][0]
+    x0, y0, x1, y1 = core['poly'].bounds
+    a = (x1 - x0) / 1000 * (y1 - y0) / 1000 - ((x1 - x0) / 1000 - 0.6) * ((y1 - y0) / 1000 - 0.6)
+    out.append(("CORE3 الشمالي (صندوق حوائط 300، الباب مقفول تحت ‑7.25)",
+                f"[{(x1-x0)/1000:.1f}×{(y1-y0)/1000:.1f} − {(x1-x0)/1000-0.6:.1f}×{(y1-y0)/1000-0.6:.1f}] × 0.40", a * 0.40, core['V']))
+    b = [r for r in B['beams'] if r['name'] == 'S(300×1500)'][0]
+    out.append(("السمل S(300×1500)", f"0.30 × {b['L']:.2f} × (‑7.35 − (‑8.45))", 0.30 * b['L'] * 1.10, b['V']))
+    return out
 
-def column_necks(msp):
-    """حجم رقاب الأعمدة في مدى الردم (من وش قاعدة كل عمود حتى ‑7.35)."""
-    L=CX.LiftOne(msp); plan,sched=ct.collect(msp); stages,_=cc.parse_schedule_stages(sched)
-    cols=[c for c in cc.columns_list(plan) if not c[1].startswith('CORE')]
-    sz={m:stages[m][0] for m in stages}
-    match=L.match([(sn,m,x,y) for sn,m,x,y in cols], sz)
-    v=0.0; n=0
-    for i,(sn,m,x,y) in enumerate(cols):
-        if i not in match: continue
-        r=match[i]; base=L.levels(r)['base']
-        if base<FILL-1e-6:
-            A=(r['x1']-r['x0'])*(r['y1']-r['y0'])/1e6; v+=A*(FILL-base); n+=1
-    return round(v,2), n
 
-def wall_necks():
-    """حوائط محيطة في مدى الردم: الطول × 0.30 × (‑7.35 − القاعدة). (أطوال/قواعد من حصر العناصر الرأسية)."""
-    segs=[("W1 شمالي",48.835,-8.45),("W2 غربي",45.0,-8.45),("W3 جنوبي",53.335,-8.45),
-          ("W4‑1 شرقي",14.1,-8.45),("W4‑2 شرقي(700)",6.0,-8.15),("W4‑3 شرقي",4.85,-8.45),
-          ("W4‑4 شرقي(700)",6.0,-8.15),("W4‑5 شرقي",14.05,-8.45)]
-    rows=[(nm, round(L*WALL_THK*(FILL-b),2)) for nm,L,b in segs]
-    return round(sum(v for _,v in rows),2), rows
+def write_excel(M, B, pend, hc, path):
+    wb = X.Workbook()
+    # ---- الملخص
+    s = X.Sheet(wb, "الملخص", [46, 16, 16], first=True)
+    s.title("البند 1: حصر الردم الداخلي — البدروم السفلي (Muttajah Mall)")
+    s.note(f"منسوب الردم {M.FILL:+.2f} — {M.fill_src}؛ مطابق لـ ‑8.85 + 1.50 = {M.fill_check[0]:+.2f}.")
+    s.note(f"حدود الردم = الوش الداخلي للجدار المحيط: {M.D_dims[0]:.3f} × {M.D_dims[1]:.3f} م = {M.D.area/1e6:.2f} م² "
+           f"(الأضلاع الغربي/الجنوبي/الشرقي + جدار الجار الشمالي 1.70م). الجدار نفسه برّه الحدود فمفيش خصم ليه.")
+    s.head(["البند", "م³", "ملاحظة"])
+    s.row(["الحجم القائم (كل مناطق وش اللبشة × ارتفاع الردم فوقها)", B['gross'], "ورقة: القائم حسب المناطق"], b=True)
+    for k, v in B['by_kind'].items():
+        s.row([f"يُخصَم: {KIND_AR[k]}", -v, "ورقة: الخصومات"])
+    s.row(["يُخصَم: الجدار المحيط", 0.0, "برّه حدود الردم"])
+    s.total("الردم الصافي (مدموك في مكانه)", B['net'], col=2)
+    s.total("+ هدر 5٪", B['net'] * WASTE, col=2, fill=X.GREY)
+    s.gap()
+    s.note(f"مرجعي: لو التوريد بمعامل انضغاط {COMPACTION:.2f} (يتعدّل من المهندس) = {B['net']*COMPACTION:.2f} م³، وبالهدر {B['net']*COMPACTION*WASTE:.2f} م³.", fill=X.GREY)
+    s.note(f"تحقق داخلي: نفس الصافي محسوب بطريقة المناطق (مساحة كل منطقة بعد الخصم × ارتفاعها) = {B['check']:.3f} م³.", fill=X.GREY)
+    s.note("بنود مش داخلة في الرقم لأن قطاعها/منسوبها مش في اللوحة — شوف ورقة «بنود ناقصة» وأثر كل واحد.", fill=X.YEL)
+    # ---- حسب المناطق
+    s = X.Sheet(wb, "حسب مناطق اللبشة", [6, 30, 10, 12, 12, 12, 10, 12, 18])
+    s.title("الردم مقسّم حسب مناسيب وش اللبشة (القائم والصافي لكل منطقة)")
+    s.note("الصافي = (مساحة المنطقة − بصمات العناصر الرأسية والخزان فوقها) × ارتفاع الردم. السملات منطقة لوحدها بوش ظهرها. "
+           "بلاطة رمب 03 بتتخصم في الآخر (مش واقعة على منطقة واحدة).")
+    s.head(["#", "المنطقة", "الوش م", "المساحة م²", "بصمات مخصومة م²", "الصافي م²", "ارتفاع الردم م", "الردم الصافي م³", "الموقع (م من 01/A)"])
+    for i, z in enumerate(B['zones'], 1):
+        s.row([i, z['name'], z['top'], z['A'], z['Aobs'], z['Anet'], z['h'], z['Vnet'], z['loc']])
+    s.total("مجموع المناطق", sum(z['Vnet'] for z in B['zones']), col=8)
+    s.row(["", "يُخصَم: بلاطة رمب 03 تحت منسوب الردم", "", "", "", "", "", -sum(v[0] for v in B['wedge'].values()), ""])
+    s.total("الردم الصافي", B['check'], col=8)
+    s.gap()
+    s.head(["", "تجميع حسب الوش", "الوش م", "المساحة م²", "بصمات م²", "الصافي م²", "الارتفاع م", "م³", ""])
+    agg = {}
+    for z in B['zones']:
+        k = round(z['top'], 2); a = agg.setdefault(k, [0, 0, 0, 0, z['h']])
+        a[0] += z['A']; a[1] += z['Aobs']; a[2] += z['Anet']; a[3] += z['Vnet']
+    for k in sorted(agg):
+        a = agg[k]; s.row(["", f"كل المناطق على وش {k:+.2f}", k, a[0], a[1], a[2], a[4], a[3], ""])
+    # ---- القائم
+    s = X.Sheet(wb, "القائم حسب المناطق", [6, 34, 10, 12, 12, 12, 18])
+    s.title("الحجم القائم: المساحة جوه حدود الردم × (منسوب الردم − وش اللبشة/القاعدة)")
+    s.head(["#", "المنطقة", "الوش م", "المساحة م²", "ارتفاع الردم م", "الحجم م³", "الموقع (م من 01/A)"])
+    for i, g in enumerate(B['gross_rows'], 1):
+        s.row([i, g['name'], g['top'], g['A'], g['h'], g['V'], g['loc']])
+    s.total("الحجم القائم", B['gross'], col=6)
+    # ---- الخصومات
+    s = X.Sheet(wb, "الخصومات", [6, 14, 30, 11, 11, 11, 12, 18])
+    s.title("الخصومات عنصر عنصر (الأرقام = أرقام لوحة المراجعة)")
+    s.note("العنصر الرأسي: Σ بصمته على كل منطقة × (منسوب الردم − وش المنطقة). الأعمدة بنفس ترقيم حصر العناصر الرأسية. "
+           "السمل: الشريحة المرسومة × (ظهره − المات ‑8.45)؛ لو تحته عمود، العمود بيتخصم بارتفاعه فوق ظهر السمل (مفيش تكرار).")
+    s.head(["#", "النوع", "العنصر", "البصمة م²", "الوش تحته م", "الارتفاع م", "الحجم م³", "الموقع (م من 01/A)"])
+    kind_ar = {'column': 'عمود', 'core': 'كور', 'tank': 'خزان', 'starter': 'بادئ رمب'}
+    for i, o in enumerate(B['obs'], 1):
+        nm = o['name']
+        if o['kind'] == 'column' and o['ref']:
+            nm += f" ({o['ref']['w']}×{o['ref']['h']})"
+        s.row([i, kind_ar[o['kind']], nm, o['A'], o['base'], o['h'], o['V'], o['loc']])
+    for k in ('column', 'core', 'tank', 'starter'):
+        s.total(f"مجموع {KIND_AR[k]}", B['by_kind'][k], col=7, fill=X.GREY)
+    s.gap()
+    s.head(["", "", "تفصيل الخزان", "البصمة م²", "", "", "الحجم م³", ""])
+    for t in B['tank_split']:
+        s.row(["", "", t['name'], t['A'], "", "", t['V'], ""])
+    s.gap()
+    s.head(["#", "النوع", "السمل", "الطول م", "العرض م", "فوق المات م", "الحجم م³", "الموقع (م من 01/A)"])
+    for i, b in enumerate(B['beams'], 1):
+        s.row([f"S{i}", "سمل", f"{b['name']} ظهره {b['top']:+.2f}", b['L'], b['w'], b['h'], b['V'], b['loc']])
+    s.total("مجموع السملات", B['by_kind']['tie_beams'], col=7, fill=X.GREY)
+    s.gap()
+    for k, (V, A, L) in B['wedge'].items():
+        if V > 0:
+            s.row(["", "بلاطة رمب", f"{k}: قاعها تحت {M.FILL:+.2f} لمسافة {L:.2f}م بعد البادئ (ميل 7.5٪)", A, "", "", V, ""])
+    # ---- مراجعة يدوية
+    s = X.Sheet(wb, "مراجعة يدوية", [44, 40, 14, 14, 12])
+    s.title("مراجعة يدوية — حساب مستقل من الأبعاد المرسومة مقابل السكريبت")
+    s.head(["العنصر", "الحساب اليدوي", "يدوي", "السكريبت", "الفرق"])
+    for nm, f, a, b in hc:
+        s.row([nm, f, a, b, a - b])
+    # ---- بنود ناقصة
+    s = X.Sheet(wb, "بنود ناقصة", [24, 26, 40, 40, 30, 30])
+    s.title("بنود مرسومة من غير قطاع أو مش مرسومة — مش داخلة في الرقم (ما افترضتش)")
+    s.head(["البند", "المكان", "الموجود في اللوحة", "الناقص", "الأثر على الردم لو اتأكد", "الأثر على العزل"])
+    for p in pend:
+        s.row([p['item'], p['where'], p['known'], p['missing'], p['fill'], p['ins']])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    wb.save(path)
+    return path
 
-def core_tank_starter_necks(msp):
-    """أكوار + خزان + بادئ رمب في مدى الردم (مقطعها × (‑7.35 − قاعدتها))."""
-    plan,_=ct.collect(msp); counts=collections.Counter(c[1] for c in cc.columns_list(plan))
-    CORE_AREA={"CORE2":2.55,"CORE3":6.36}; CORE_BASE=-7.75
-    rows=[]; v=0.0
-    for c in sorted(x for x in counts if x in CORE_AREA):
-        a=CORE_AREA[c]; n=counts[c]; vv=n*a*(FILL-CORE_BASE)
-        rows.append((f"{c}×{n}", round(vv,2))); v+=vv
-    TANK_AREA=16.6334+1.35+0.65; vt=TANK_AREA*(FILL-CORE_BASE); rows.append(("الخزان T1", round(vt,2))); v+=vt
-    # بادئ الرمب: حائط 250مم بعرض الرمب من ‑8.45 حتى ‑7.35 (ضمن مدى الردم)
-    vs=(3.9+4.2)*0.25*(FILL-MAT_TOP); rows.append(("بادئ الرمب", round(vs,2))); v+=vs
-    return round(v,2), rows
 
-def main():
-    doc=ezdxf.readfile(cc.DEFAULT_DXF); msp=doc.modelspace()
-    raft, zones = raft_zones(msp)
-    # الحجم القائم (قبل خصم الخرسانة)
-    gross_rows=[]; gross=0.0
-    for top,A in zones.items():
-        h=round(FILL-top,2); v=round(A*h,2); gross_rows.append((top,round(A,1),h,v)); gross+=v
-    nc,ncn=column_necks(msp); nw,wrows=wall_necks(); no,orows=core_tank_starter_necks(msp)
-    deduct=round(nc+nw+no,2); net=round(gross-deduct,2); supply=round(net*COMPACTION,2)
-    print("البند 1: حصر الردم الداخلي — البدروم السفلي (منسوب الردم ‑7.35)")
-    print(f"اللبشة الكلية = {raft:.1f} م²")
-    print("\nالحجم القائم حسب مناطق وش اللبشة:")
-    for top,A,h,v in gross_rows: print(f"  وش {top}: مساحة {A}م² × ارتفاع {h}م = {v} م³")
-    print(f"  الحجم القائم = {round(gross,1)} م³")
-    print(f"\nيُخصَم خرسانة في مدى الردم: رقاب أعمدة {nc} ({ncn} عمود) + حوائط {nw} + (أكوار/خزان/بادئ) {no} = {deduct} م³")
-    print(f"\nالردم المدموك (صافي) = {net} م³")
-    print(f"الردم المطلوب توريده (× معامل انضغاط {COMPACTION}) = {supply} م³ | +هدر 5٪ = {round(supply*WASTE,2)} م³")
-    print("غير موجود في اللوحة (لم يُفترَض، لا خصم): السملات (tie beams)، حفر الأسانسير، الهوابط السفلية — لا مسقط/منسوب لها في الـDXF.")
-    # Excel
-    try:
-        from openpyxl import Workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        from openpyxl.utils import get_column_letter
-        NAVY,LT,GRN,GREY,YEL="1F3864","D9E1F2","E2EFDA","F2F2F2","FFF2CC"
-        bd=Border(*[Side(style="thin",color="BFBFBF")]*4)
-        def st(c,*,b=False,sz=11,color="000000",fill=None,ha="center",wrap=False):
-            c.font=Font(bold=b,size=sz,color=color); c.alignment=Alignment(ha,"center",wrap_text=wrap)
-            if fill:c.fill=PatternFill("solid",fgColor=fill)
-            c.border=bd
-        wb=Workbook(); ws=wb.active; ws.title="الردم"; ws.sheet_view.rightToLeft=True
-        ws.merge_cells("A1:D1"); st(ws["A1"],b=True,sz=13,color="FFFFFF",fill=NAVY); ws["A1"]="البند 1: حصر الردم الداخلي — البدروم السفلي"
-        ws.merge_cells("A2:D2"); st(ws.cell(2,1,f"منسوب الردم ‑7.35 (أعلى قاعدة 1500مم). الحجم = Σ(مساحة المنطقة × (‑7.35 − وش اللبشة)) − خرسانة العناصر الرأسية في مدى الردم. المدموك ثم ×معامل انضغاط {COMPACTION} للتوريد."),sz=9,fill=GRN,ha="right",wrap=True); ws.row_dimensions[2].height=40
-        r=3; st(ws.cell(r,1,"الحجم القائم حسب مناطق وش اللبشة"),b=True,fill=NAVY,color="FFFFFF"); ws.merge_cells(f"A{r}:D{r}"); r+=1
-        for h in ["وش اللبشة","المساحة م²","ارتفاع الردم م","الحجم م³"]: pass
-        for j,h in enumerate(["وش اللبشة","المساحة م²","ارتفاع الردم م","الحجم م³"],1): st(ws.cell(r,j,h),b=True,fill=LT)
-        r+=1
-        for top,A,h,v in gross_rows:
-            st(ws.cell(r,1,top)); st(ws.cell(r,2,A)); st(ws.cell(r,3,h)); st(ws.cell(r,4,v)); r+=1
-        st(ws.cell(r,1,"الحجم القائم"),b=True,fill=GRN); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,round(gross,2)),b=True,fill=GRN); r+=2
-        st(ws.cell(r,1,"يُخصَم: خرسانة في مدى الردم"),b=True,fill=NAVY,color="FFFFFF"); ws.merge_cells(f"A{r}:D{r}"); r+=1
-        st(ws.cell(r,1,f"رقاب الأعمدة ({ncn} عمود)"),ha="right",fill=LT); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,-nc),fill=LT); r+=1
-        for nm,v in wrows: st(ws.cell(r,1,f"حائط {nm}"),ha="right",fill=LT); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,-v),fill=LT); r+=1
-        for nm,v in orows: st(ws.cell(r,1,nm),ha="right",fill=LT); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,-v),fill=LT); r+=1
-        st(ws.cell(r,1,"مجموع الخصم"),b=True,fill=GREY); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,-deduct),b=True,fill=GREY); r+=2
-        st(ws.cell(r,1,"الردم المدموك (صافي)"),b=True,fill=GRN); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,net),b=True,fill=GRN); r+=1
-        st(ws.cell(r,1,f"الردم المطلوب توريده (×{COMPACTION})"),b=True,fill=GRN); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,supply),b=True,fill=GRN); r+=1
-        st(ws.cell(r,1,"+ هدر 5٪ على التوريد"),b=True,fill=GREY); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,round(supply*WASTE,2)),b=True,fill=GREY); r+=2
-        st(ws.cell(r,1,"غير موجود في اللوحة (لم يُفترَض، لا خصم): السملات (tie beams)، حفر الأسانسير، الهوابط السفلية."),ha="right",fill=YEL); ws.merge_cells(f"A{r}:D{r}")
-        for j,w in enumerate([30,14,14,12],1): ws.column_dimensions[get_column_letter(j)].width=w
-        os.makedirs(OUT,exist_ok=True); p=os.path.join(OUT,"حصر الردم الداخلي - البدروم السفلي.xlsx")
-        wb.save(p); print("SAVED:",p)
-    except Exception as e:
-        import traceback; print("Excel skip:",e); traceback.print_exc()
+def main(argv=None):
+    ap = argparse.ArgumentParser(); ap.add_argument("--no-review", action="store_true")
+    a = ap.parse_args(argv)
+    logging.disable(logging.WARNING)
+    doc = ezdxf.readfile(cc.DEFAULT_DXF)
+    M = SM.Substructure(doc.modelspace())
+    B = SC.backfill(M); pend = SC.pending_items(M); hc = hand_checks(M, B)
+    print(f"البند 1: الردم الداخلي — منسوب الردم {M.FILL:+.2f} ({M.fill_src})")
+    print(f"حدود الردم {M.D_dims[0]:.3f} × {M.D_dims[1]:.3f} = {M.D.area/1e6:.2f} م²")
+    print(f"القائم {B['gross']:.2f} م³")
+    for k, v in B['by_kind'].items(): print(f"  − {KIND_AR[k]}: {v:.2f}")
+    print(f"الصافي {B['net']:.2f} م³ (تحقق بالمناطق {B['check']:.2f}) | +هدر 5٪ = {B['net']*WASTE:.2f}")
+    for nm, f, x, y in hc: print(f"  يدوي: {nm}: {x:.3f} | سكريبت {y:.3f}")
+    p = write_excel(M, B, pend, hc, os.path.join(OUT, "حصر الردم الداخلي - البدروم السفلي.xlsx")); print("SAVED:", p)
+    if not a.no_review:
+        print("SAVED:", FR.backfill_png(M, B, os.path.join(OUT, "مراجعة الردم - البدروم السفلي.png")))
+        for f in FR.backfill_dxf(doc, M, B, pend, os.path.join(OUT, "مراجعة الردم - البدروم السفلي.dxf")): print("SAVED:", f)
+    return M, B
 
-if __name__=="__main__":
-    sys.stdout.reconfigure(encoding="utf-8",errors="replace"); main()
+
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace"); main()
