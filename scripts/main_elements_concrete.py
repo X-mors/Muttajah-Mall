@@ -247,8 +247,9 @@ def main():
         st(ws5.cell(r5,3,nt),ha="right",fill=(None if v is not None else YEL));
         if v: tot+=v
         r5+=1
-    st(ws5.cell(r5,1,"الإجمالي (كل العناصر الرأسية)"),b=True,fill=NAVY,color="FFFFFF"); st(ws5.cell(r5,2,round(tot,2)),b=True,fill=GRN); st(ws5.cell(r5,3,"أعمدة + حوائط + أكوار + خزان + بادئ رمب")); r5+=1
-    st(ws5.cell(r5,1,"+ هدر 5٪"),b=True,fill=GREY); st(ws5.cell(r5,2,round(tot*WASTE,2)),b=True,fill=GRN); r5+=2
+    precise=grand+v_walls+v_cores+v_tank+v_starter   # إجمالي دقيق (قبل التقريب) — الهالك منه
+    st(ws5.cell(r5,1,"الإجمالي (كل العناصر الرأسية)"),b=True,fill=NAVY,color="FFFFFF"); st(ws5.cell(r5,2,round(precise,2)),b=True,fill=GRN); st(ws5.cell(r5,3,"أعمدة + حوائط + أكوار + خزان + بادئ رمب")); r5+=1
+    st(ws5.cell(r5,1,"+ هدر 5٪"),b=True,fill=GREY); st(ws5.cell(r5,2,round(precise*WASTE,2)),b=True,fill=GRN); r5+=2
     st(ws5.cell(r5,1,"للمطابقة: الإجمالي بدون الحوائط المحيطة"),b=True,fill=YEL,ha="right"); st(ws5.cell(r5,2,round(tot-v_walls,2)),b=True,fill=YEL); st(ws5.cell(r5,3,"لو الـproject يحصر الحوائط في بند منفصل"),ha="right",fill=YEL); r5+=1
     st(ws5.cell(r5,1,"— منها: أعمدة + أكوار + خزان"),fill=LT,ha="right"); st(ws5.cell(r5,2,round(grand+v_cores+v_tank,2)),fill=LT); st(ws5.cell(r5,3,f"{round(grand,1)} + {round(v_cores,1)} + {round(v_tank,1)} (مطابق للـproject)"),ha="right",fill=LT); r5+=1
     for j,w in enumerate([30,12,34],1): ws5.column_dimensions[get_column_letter(j)].width=w
@@ -270,7 +271,7 @@ def main():
 
     tot_all=grand+v_walls+v_cores+v_tank+v_starter
     print(f"\nالحوائط {v_walls:.1f} | الأكوار {v_cores:.1f} | الخزان {v_tank:.1f} | بادئ الرمب {v_starter:.2f} م³")
-    print(f"الإجمالي الكلي (كل العناصر الرأسية) = {tot_all:.1f} م³ | +هدر 5٪ = {tot_all*WASTE:.1f} م³")
+    print(f"الإجمالي الكلي (كل العناصر الرأسية) = {tot_all:.2f} م³ | +هدر 5٪ = {tot_all*WASTE:.2f} م³")
 
     os.makedirs(args.outdir,exist_ok=True)
     # قيم العناصر غير المقرّبة → تقرأها لوحة الحصر (vertical_elements_drawing) فتطابق هذا الحصر بالظبط
