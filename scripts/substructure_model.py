@@ -132,7 +132,7 @@ class Substructure:
         self.footings = []
         for i, z in enumerate(sorted(self.L.zones, key=lambda z: (-z['th'], z['pts'][0]))):
             p = _poly(z['pts'])
-            self.footings.append(dict(poly=p, th=z['th'], top=round(z['top'], 3), name=f"قاعدة {z['th']}"))
+            self.footings.append(dict(poly=p, th=z['th'], top=round(z['top'], 3), name=f"قاعدة {z['th']}", uid=f"F{i}"))
 
     def _read_beams(self, RX, RY):
         rx = re.compile(r"S\s*\(\s*(\d+)\s*[xX]\s*(\d+)\s*\)")
@@ -165,6 +165,8 @@ class Substructure:
             self.beams.append(dict(poly=p, w=w, d=dd, top=round(FORMATION + dd / 1000.0, 3), L=L / 1000.0,
                                    name=f"S({w}×{dd})", c=(c.x, c.y)))
         self.beams.sort(key=lambda b: (-b['d'], -b['c'][1], b['c'][0]))
+        for j, b in enumerate(self.beams):
+            b['uid'] = f"B{j}"
 
     def _read_columns(self):
         """مستطيلات الأعمدة المرسومة + اسم/رقم كل عمود (نفس ترتيب حصر العناصر الرأسية)."""
@@ -282,19 +284,19 @@ class Substructure:
 
         # العناصر الرأسية/المستبعدة — بأولوية لمنع العدّ مرتين
         obs = []; taken = Polygon()
-        def add(kind, name, poly, ref=None):
+        def add(kind, name, poly, ref=None, uid=None):
             nonlocal taken
             g = poly.intersection(D).difference(taken)
             if g.area > 1.0:                     # > 1 مم²
-                obs.append(dict(kind=kind, name=name, poly=g, ref=ref))
+                obs.append(dict(kind=kind, name=name, poly=g, ref=ref, uid=uid))
                 taken = taken.union(g)
-        add('tank', 'الخزان T1 (الحوائط + الداخل)', self.tank_out)
+        add('tank', 'الخزان T1 (الحوائط + الداخل)', self.tank_out, None, 'TANK')
         for c in self.cores:
-            add('core', c['label'], c['solid'], c)
-        for c in sorted(self.columns, key=lambda c: (c['no'] or 999)):
-            add('column', f"{c['mark']}" + (f" #{c['no']}" if c['no'] else ''), c['poly'], c)
+            add('core', c['label'], c['solid'], c, 'CORE:' + c['label'])
+        for k, c in enumerate(sorted(self.columns, key=lambda c: (c['no'] or 999))):
+            add('column', f"{c['mark']}" + (f" #{c['no']}" if c['no'] else ''), c['poly'], c, f"COL{c['no'] or 900 + k}")
         for s in self.starters:
-            add('starter', s['name'], s['poly'], s)
+            add('starter', s['name'], s['poly'], s, 'ST:' + s['ramp'])
         self.obs = obs
         self.O = unary_union([o['poly'] for o in obs]) if obs else Polygon()
         # داخل كوري الأسانسير (CORE1 جنب الخزان + CORE2): مش بيتردم (تعليمة المهندس 2026-11-23) — بيتخصم من الردم بس؛
@@ -308,7 +310,8 @@ class Substructure:
                 inner = inner.difference(self.tank_out)
             inner = _snap(inner).intersection(D).difference(self.O)
             if inner.area > 1.0:
-                self.lifts.append(dict(kind='lift', name=f"داخل {c['label']} (أسانسير — مش بيتردم)", poly=inner, ref=c))
+                self.lifts.append(dict(kind='lift', name=f"داخل {c['label']} (أسانسير — مش بيتردم)", poly=inner, ref=c,
+                                       uid='LIFT:' + c['label']))
         self.O_fill = unary_union([self.O] + [l['poly'] for l in self.lifts])
 
         # z-field (للفحص النقطي)
@@ -325,10 +328,14 @@ class Substructure:
 
     def zone_regions(self):
         """[(الاسم، النوع، المنطقة، الوش)] لكل منطقة وش لبشة داخل D (المات + القواعد + السملات)."""
-        out = [("المات العام", 'mat', self.mat_region, MAT_TOP)]
-        out += [(f['name'], 'footing', f['region'], f['top']) for f in self.fz]
-        out += [(b['name'], 'beam', b['region'], b['top']) for b in self.bz]
-        return [r for r in out if r[2].area > 1.0]
+        return [r[1:] for r in self.zone_regions_uid()]
+
+    def zone_regions_uid(self):
+        """[(uid، الاسم، النوع، المنطقة، الوش)]."""
+        out = [('MAT', "المات العام", 'mat', self.mat_region, MAT_TOP)]
+        out += [(f['uid'], f['name'], 'footing', f['region'], f['top']) for f in self.fz]
+        out += [(b['uid'], b['name'], 'beam', b['region'], b['top']) for b in self.bz]
+        return [r for r in out if r[3].area > 1.0]
 
     @staticmethod
     def samples(geom, step=STEP):

@@ -1,37 +1,188 @@
 # -*- coding: utf-8 -*-
 """
-لوحات مراجعة بندَي الردم والعزل — على نسخة من اللوحة نفسها (فوق مسقط RAFT CONCRETE DIMENSIONS) + صورة PNG.
-  • الردم: حدود الردم (الوش الداخلي للجدار) + مناطق وش اللبشة ملوّنة بارتفاع الردم + العناصر المخصومة مرقّمة
-    بنفس أرقام الإكسل + البنود الناقصة (حفر الصرف/الأسانسير) بخط متقطّع.
-  • العزل: الأسطح الأفقية المعزولة ملوّنة + كل وش رأسي معزول مرسوم خط على حافته بلون نوعه + مساحة كل عنصر.
-الاستخدام المباشر: python foundation_review.py   (بيعمل اللوحتين؛ نفس اللي بيعمله سكريبتا الحصر)
+لوحات مراجعة بندَي الردم والعزل — صورة PNG بالعربي وصورة بالإنجليزي + نسخة DXF/DWG على اللوحة نفسها.
+كل عنصر عليه رقمه من substructure_calc.elements() — نفس الرقم في عمود «رقم على اللوحة» في الإكسل.
+
+ملاحظة الخط العربي: matplotlib 3.11 بيشكّل العربي بنفسه → النص العربي بيتكتب زي ما هو بخط Tahoma
+(من غير arabic_reshaper/bidi — دول كانوا بيقلبوا الحروف ويلخبطوا الصورة).
+في الـDXF الكتابة أرقام وإنجليزي بس (خطوط الأوتوكاد SHX مش بتشكّل العربي).
 """
-import os, sys, math
+import os, sys
 import ezdxf
 import column_exact as CX
 
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "output")
 RX, RY = CX.PLAN_ORIGIN['RAFT']
-TOP_ACI = {-8.45: 151, -8.15: 4, -7.85: 3, -7.75: 2, -7.55: 30, -7.35: 1}       # لون كل منسوب وش
-TOP_HEX = {-8.45: "#bfe3ff", -8.15: "#9ad1d4", -7.85: "#b7e4a8", -7.75: "#fff2a8", -7.55: "#ffc98b", -7.35: "#f4a3a3"}
-KIND_ACI = {'footing': 5, 'beam': 140, 'column': 1, 'core': 6, 'tank': 4, 'starter': 30, 'perim': 3}
-KIND_HEX = {'footing': "#1565c0", 'beam': "#00838f", 'column': "#c62828", 'core': "#8e24aa", 'tank': "#00897b",
-            'starter': "#ef6c00", 'perim': "#2e7d32"}
+FONT = "Tahoma"
+TOP_HEX = {-8.45: "#cfe8fc", -8.15: "#9ad1d4", -7.85: "#b7e4a8", -7.75: "#fff2a8", -7.55: "#ffc98b", -7.35: "#f4a3a3"}
+TOP_ACI = {-8.45: 151, -8.15: 4, -7.85: 3, -7.75: 2, -7.55: 30, -7.35: 1}
+KIND_HEX = {'footing': "#1565c0", 'beam': "#00838f", 'column': "#c62828", 'core': "#8e24aa", 'tank': "#00695c",
+            'starter': "#ef6c00", 'perim': "#2e7d32", 'lift': "#d81b60", 'sump': "#d81b60", 'wedge': "#6d4c41", 'mat': "#1565c0"}
+KIND_ACI = {'footing': 5, 'beam': 140, 'column': 1, 'core': 6, 'tank': 4, 'starter': 30, 'perim': 3, 'lift': 6,
+            'sump': 6, 'wedge': 34, 'mat': 5}
 
-
-def arabic(s):
-    try:
-        import arabic_reshaper
-        from bidi.algorithm import get_display
-        return get_display(arabic_reshaper.reshape(s))
-    except Exception:
-        return s
+T = {  # نصوص الصور
+    'ar': dict(
+        fill_title="حصر الردم الداخلي — البدروم السفلي",
+        fill_sub="منسوب الردم {F} (وش قاعدة الـ1.50م)  |  الصافي {net} م³  |  بالهالك 5٪ {waste} م³",
+        ins_title="حصر العزل بالدهان — البدروم السفلي",
+        ins_sub="لحد منسوب الردم {F} بالظبط  |  الصافي {net} م²  |  بالهالك 5٪ {waste} م²",
+        lvl="وش {t}  ←  ارتفاع الردم {h} م", lvl_ins="ظهر {t}", ded="مخصوم من الردم (العنصر برقمه)",
+        nofill="جوّه مش بيتردم", bound="حدود الردم: الوش الداخلي للجدار",
+        num="الأرقام = رقم العنصر في شيت الإكسل", x="X (م) من المحور 01", y="Y (م) من المحور A",
+        k=dict(footing="جوانب القواعد", beam="جوانب السملات", column="رقاب الأعمدة", core="الأكوار (برّه وجوّه)",
+               perim="الوش الداخلي للجدار المحيط", tank="الخزان (برّه بس)", starter="بادئا الرامب", lift="حفر الأسانسير",
+               sump="حفر الصرف", wedge="قاع بلاطة رامب 03"),
+        f=dict(beam="السملات", column="رقاب الأعمدة", core="الأكوار", tank="الخزان", starter="بادئا الرامب",
+               lift="داخل كوري الأسانسير", wedge="بلاطة رامب 03"),
+        tank="الخزان — جوّه مش بيتعزل ولا بيتردم", m2="م²", m3="م³", gross="القائم", net="الصافي",
+        waste="بالهالك 5٪", horiz="الأفقي (ظهر المات والقواعد والسملات)", total="الإجمالي",
+    ),
+    'en': dict(
+        fill_title="Internal backfill — Lower basement",
+        fill_sub="Fill level {F} (top of the 1.50 m footing)  |  Net {net} m³  |  +5% waste {waste} m³",
+        ins_title="Bitumen-paint insulation — Lower basement",
+        ins_sub="Exactly up to fill level {F}  |  Net {net} m²  |  +5% waste {waste} m²",
+        lvl="Top {t}  →  fill height {h} m", lvl_ins="Top {t}", ded="Deducted from fill (element number)",
+        nofill="not filled inside", bound="Fill boundary: inner face of perimeter wall",
+        num="Numbers = element number in the Excel sheet", x="X (m) from axis 01", y="Y (m) from axis A",
+        k=dict(footing="Footing sides", beam="Tie-beam sides", column="Column necks", core="Cores (outside + inside)",
+               perim="Perimeter wall inner face", tank="Tank (outside only)", starter="Ramp starters", lift="Lift pits",
+               sump="Sump pits", wedge="Ramp 03 slab soffit"),
+        f=dict(beam="Tie beams", column="Column necks", core="Cores", tank="Tank", starter="Ramp starters",
+               lift="Inside lift cores", wedge="Ramp 03 slab"),
+        tank="Tank — inside not insulated, not filled", m2="m²", m3="m³", gross="Gross", net="Net",
+        waste="+5% waste", horiz="Horizontal tops (raft, footings, tie beams)", total="Total",
+    ),
+}
 
 
 def _polys(g):
     return [g] if g.geom_type == 'Polygon' else [p for p in getattr(g, 'geoms', []) if p.geom_type == 'Polygon']
 
 
+def _fig():
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams['font.family'] = FONT
+    plt.rcParams['axes.unicode_minus'] = False
+    fig = plt.figure(figsize=(26, 19))
+    ax = fig.add_axes([0.035, 0.07, 0.70, 0.83])
+    return plt, fig, ax
+
+
+def _patch(ax, g, fc, ec='none', lw=0.4, z=1, alpha=1.0):
+    """مضلّع بفتحات حقيقية (الفتحة شفافة — اللي تحتها يبان)."""
+    from matplotlib.path import Path
+    from matplotlib.patches import PathPatch
+    from shapely.geometry.polygon import orient
+    for p in _polys(g):
+        p = orient(p, 1.0); verts = []; codes = []
+        for ring in [p.exterior] + list(p.interiors):
+            c = [(x / 1000, y / 1000) for x, y in ring.coords]
+            verts += c; codes += [Path.MOVETO] + [Path.LINETO] * (len(c) - 2) + [Path.CLOSEPOLY]
+        ax.add_patch(PathPatch(Path(verts, codes), fc=fc, ec=ec, lw=lw, zorder=z, alpha=alpha))
+
+
+def _num(ax, e, small=False, color='#b71c1c'):
+    x, y = e['anchor']
+    ax.text(x / 1000, y / 1000, str(e['no']), fontsize=6.5 if small else 9, ha='center', va='center', color=color,
+            weight='bold', zorder=20, bbox=dict(boxstyle='round,pad=0.15', fc='white', ec=color, lw=0.6, alpha=0.9))
+
+
+def _frame(ax, M, title, sub, L, lw=2.5, ls='-'):
+    xs, ys = M.D.exterior.xy
+    ax.plot([v / 1000 for v in xs], [v / 1000 for v in ys], color='#d50000', lw=lw, ls=ls, zorder=15)
+    ax.set_aspect('equal'); ax.grid(True, ls=':', alpha=0.35)
+    x0, y0, x1, y1 = M.D.bounds
+    ax.set_xlim(x0 / 1000 - 4, x1 / 1000 + 4); ax.set_ylim(y0 / 1000 - 3, y1 / 1000 + 3)
+    ax.set_xlabel(L['x'], fontsize=11); ax.set_ylabel(L['y'], fontsize=11)
+    fig = ax.figure
+    fig.text(0.39, 0.965, title, ha='center', fontsize=22, weight='bold')
+    fig.text(0.39, 0.932, sub, ha='center', fontsize=14, color='#333')
+
+
+def _fmt(v, n=2):
+    return f"{v:,.{n}f}"
+
+
+def _box(fig, lines, y, lang):
+    ha = 'right' if lang == 'ar' else 'left'
+    x = 0.985 if lang == 'ar' else 0.745
+    fig.text(x, y, "\n".join(lines), fontsize=13, va='top', ha=ha, linespacing=1.6,
+             bbox=dict(boxstyle='round,pad=0.6', fc='#f7f7f7', ec='#999'))
+
+
+# ═══════════════════════════════════════════════════════════════════ الردم
+def backfill_png(M, B, E, lang, path):
+    L = T[lang]; plt, fig, ax = _fig()
+    from matplotlib.patches import Patch
+    for z in B['zones']:
+        _patch(ax, z['region'], TOP_HEX.get(round(z['top'], 2), '#ddd'), ec='#777', lw=0.4)
+    for e in E:
+        if e['kind'] in ('column', 'core', 'tank', 'starter', 'lift', 'wedge'):
+            fc = '#ffd6e7' if e['kind'] == 'lift' else ('#e0c9b8' if e['kind'] == 'wedge' else '#9e9e9e')
+            _patch(ax, e['poly'], fc, ec='#212121', lw=0.6, z=5, alpha=0.9 if e['kind'] != 'wedge' else 0.7)
+    for e in E:
+        if e['kind'] in ('mat', 'footing', 'beam', 'column', 'core', 'tank', 'starter', 'lift', 'wedge'):
+            _num(ax, e, small=e['kind'] in ('column', 'beam'))
+        if e['kind'] == 'lift':
+            x, y = e['anchor']; ax.text(x / 1000, y / 1000 - 0.9, L['nofill'], fontsize=8, ha='center', color='#ad1457', zorder=21)
+    _frame(ax, M, L['fill_title'], L['fill_sub'].format(F=f"{M.FILL:+.2f}", net=_fmt(B['net']), waste=_fmt(B['net'] * 1.05)), L)
+    hand = [Patch(fc=v, ec='#777', label=L['lvl'].format(t=f"{k:+.2f}", h=f"{M.FILL-k:.2f}")) for k, v in sorted(TOP_HEX.items())]
+    hand += [Patch(fc='#9e9e9e', ec='#212121', label=L['ded']), Patch(fc='#ffd6e7', ec='#212121', label=L['f']['lift'] + " — " + L['nofill']),
+             Patch(fc='white', ec='#d50000', lw=2, label=L['bound'])]
+    ax.legend(handles=hand, loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=13, frameon=True)
+    bk = B['by_kind']
+    lines = [f"{L['gross']}  {_fmt(B['gross'])} {L['m3']}"]
+    lines += [f"−  {L['f'][k]}  {_fmt(bk[k])}" for k in ('beam', 'column', 'core', 'tank', 'starter', 'lift', 'wedge')]
+    lines += [f"{L['net']}  {_fmt(B['net'])} {L['m3']}", f"{L['waste']}  {_fmt(B['net']*1.05)} {L['m3']}", "", L['num']]
+    _box(fig, lines, 0.50, lang)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fig.savefig(path, dpi=130, facecolor='white'); plt.close(fig)
+    return path
+
+
+# ═══════════════════════════════════════════════════════════════════ العزل
+def insulation_png(M, I, E, lang, path):
+    L = T[lang]; plt, fig, ax = _fig()
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+    for h in I['horiz']:
+        _patch(ax, h['region'], TOP_HEX.get(round(h['top'], 2), '#ddd'), alpha=0.85)
+    for q in I['pits']:
+        _patch(ax, q['poly'], '#f8bbd0', ec=KIND_HEX[q['kind']], lw=1.2, z=4)
+    tk = [e for e in E if e['kind'] == 'tank'][0]
+    _patch(ax, tk['poly'], '#e0e0e0', z=3)
+    x, y = tk['anchor']; ax.text(x / 1000, y / 1000 - 1.2, L['tank'], ha='center', fontsize=10, zorder=21)
+    segs = [(s['kind'], s['segs']) for s in I['sides']] + [(v['kind'], v['segs']) for v in I['vert']] + [('perim', p['segs']) for p in I['perim']]
+    for kind, ss in segs:
+        off = 280 if kind == 'perim' else 0          # الجدار المحيط: الخط جوّه الحدود عشان يبان
+        for (x0, y0, x1, y1, nx, ny, hh) in ss:
+            ax.plot([(x0 + nx * off) / 1000, (x1 + nx * off) / 1000], [(y0 + ny * off) / 1000, (y1 + ny * off) / 1000],
+                    color=KIND_HEX[kind], lw=3.2 if kind == 'perim' else 2.4, solid_capstyle='butt', zorder=16 if kind == 'perim' else 6)
+    we = [e for e in E if e['kind'] == 'wedge'][0]
+    _patch(ax, we['poly'], '#d7ccc8', ec=KIND_HEX['wedge'], lw=1.0, z=4, alpha=0.8)
+    for e in E:
+        _num(ax, e, small=e['kind'] in ('column', 'beam'), color='#1a237e' if e['kind'] in ('mat', 'footing', 'beam') else '#b71c1c')
+    _frame(ax, M, L['ins_title'], L['ins_sub'].format(F=f"{M.FILL:+.2f}", net=_fmt(I['total']), waste=_fmt(I['total'] * 1.05)), L, lw=1.0, ls='--')
+    t = I['totals']
+    val = dict(footing=t['s_foot'], beam=t['s_beam'], column=t['col'], core=t['core'], perim=t['perim'], tank=t['tank'],
+               starter=t['starter'], lift=sum(q['A_bot'] + q['A_side'] for q in I['pits'] if q['kind'] == 'lift'),
+               sump=sum(q['A_bot'] + q['A_side'] for q in I['pits'] if q['kind'] == 'sump'), wedge=t['wedge'])
+    hand = [Line2D([0], [0], color=KIND_HEX[k], lw=5, label=f"{L['k'][k]}  {_fmt(v)} {L['m2']}") for k, v in val.items()]
+    hand += [Patch(fc=v, label=L['lvl_ins'].format(t=f"{k:+.2f}")) for k, v in sorted(TOP_HEX.items())]
+    ax.legend(handles=hand, loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=12.5, frameon=True)
+    hz = t['h_mat'] + t['h_foot'] + t['h_beam']
+    lines = [f"{L['horiz']}  {_fmt(hz)} {L['m2']}", f"{L['total']}  {_fmt(I['total'])} {L['m2']}",
+             f"{L['waste']}  {_fmt(I['total']*1.05)} {L['m2']}", "", L['num']]
+    _box(fig, lines, 0.33, lang)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fig.savefig(path, dpi=130, facecolor='white'); plt.close(fig)
+    return path
+
+
+# ═══════════════════════════════════════════════════════════════════ DXF (أرقام + إنجليزي)
 def _A(x, y):
     return (x + RX, y + RY)
 
@@ -54,187 +205,53 @@ def _hatch(msp, g, layer, aci, transp=0.55):
         except Exception: pass
 
 
-def _outline(msp, g, layer, aci, lw=50, dashed=False):
-    for p in _polys(g):
-        for ring in [p.exterior] + list(p.interiors):
-            e = msp.add_lwpolyline([_A(*c) for c in ring.coords], close=True,
-                                   dxfattribs={'layer': layer, 'color': aci, 'lineweight': lw})
-            if dashed: e.dxf.linetype = 'DASHED' if 'DASHED' in msp.doc.linetypes else 'CONTINUOUS'
-
-
 def _text(msp, s, x, y, layer, aci, h=220):
     t = msp.add_text(s, height=h, dxfattribs={'layer': layer, 'color': aci})
     t.set_placement(_A(x, y), align=ezdxf.enums.TextEntityAlignment.MIDDLE_CENTER)
 
 
-def _title(msp, M, layer, lines):
+def review_dxf(doc, M, E, item, data, path):
+    msp = doc.modelspace(); P = f"CHK-{item.upper()}"
+    for n, c in ((P + "-AREAS", 2), (P + "-ELEMENTS", 8), (P + "-FACES", 1), (P + "-NUMBERS", 1), (P + "-BOUNDARY", 1)):
+        _layer(doc, n, c)
+    if item == 'fill':
+        for z in data['zones']:
+            _hatch(msp, z['region'], P + "-AREAS", TOP_ACI.get(round(z['top'], 2), 8))
+        for e in E:
+            if e['kind'] in ('column', 'core', 'tank', 'starter', 'lift', 'wedge'):
+                _hatch(msp, e['poly'], P + "-ELEMENTS", 8 if e['kind'] != 'lift' else 6, transp=0.2)
+        show = ('mat', 'footing', 'beam', 'column', 'core', 'tank', 'starter', 'lift', 'wedge')
+        head = f"INTERNAL BACKFILL - fill level {M.FILL:+.2f} - net {data['net']:.2f} m3 (+5% {data['net']*1.05:.2f})"
+    else:
+        for h in data['horiz']:
+            _hatch(msp, h['region'], P + "-AREAS", TOP_ACI.get(round(h['top'], 2), 8), transp=0.65)
+        segs = [(s['kind'], s['segs']) for s in data['sides']] + [(v['kind'], v['segs']) for v in data['vert']] + [('perim', p['segs']) for p in data['perim']]
+        for kind, ss in segs:
+            for (x0, y0, x1, y1, nx, ny, hh) in ss:
+                msp.add_lwpolyline([_A(x0 + nx * 60, y0 + ny * 60), _A(x1 + nx * 60, y1 + ny * 60)],
+                                   dxfattribs={'layer': P + "-FACES", 'color': KIND_ACI[kind], 'lineweight': 70})
+        for q in data['pits']:
+            _hatch(msp, q['poly'], P + "-ELEMENTS", 6, transp=0.3)
+        show = tuple(KIND_ACI)
+        head = f"BITUMEN-PAINT INSULATION - up to fill level {M.FILL:+.2f} - net {data['total']:.2f} m2 (+5% {data['total']*1.05:.2f})"
+    for e in E:
+        if e['kind'] in show:
+            x, y = e['anchor']
+            _text(msp, str(e['no']), x, y, P + "-NUMBERS", 1, h=170 if e['kind'] in ('column', 'beam') else 320)
+    msp.add_lwpolyline([_A(*c) for c in M.D.exterior.coords], close=True,
+                       dxfattribs={'layer': P + "-BOUNDARY", 'color': 1, 'lineweight': 100})
     x0, y0, x1, y1 = M.D.bounds
-    for i, s in enumerate(lines):
-        _text(msp, s, (x0 + x1) / 2, y1 + 3500 - i * 900, layer, 1 if i == 0 else 7, h=650 if i == 0 else 380)
-
-
-def _save(doc, path, dwg=True):
+    _text(msp, head, (x0 + x1) / 2, y1 + 3600, P + "-NUMBERS", 1, h=650)
+    _text(msp, "Numbers = element number in the Excel sheet (same as the PNG review images)", (x0 + x1) / 2, y1 + 2600, P + "-NUMBERS", 7, h=380)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     doc.saveas(path); out = [path]
-    if dwg:
-        try:
-            import takeoff
-            d = takeoff.to_dwg(path)
-            if d: out.append(d)
-        except Exception as e:
-            print("تعذّر تحويل DWG:", e)
+    try:
+        import takeoff
+        d = takeoff.to_dwg(path)
+        if d: out.append(d)
+    except Exception as e:
+        print("تعذّر تحويل DWG:", e)
     return out
-
-
-# ═══════════════════════════════════════════════════════════════════ الردم
-def backfill_dxf(doc, M, B, pend, path):
-    msp = doc.modelspace()
-    for n, c in (("CHK-FILL-ZONES", 2), ("CHK-FILL-DEDUCT", 8), ("CHK-FILL-BOUNDARY", 1), ("CHK-FILL-TEXT", 7), ("CHK-PENDING", 6)):
-        _layer(doc, n, c)
-    for z in B['zones']:
-        _hatch(msp, z['region'], "CHK-FILL-ZONES", TOP_ACI.get(round(z['top'], 2), 8))
-    for i, o in enumerate(B['obs'], 1):
-        _hatch(msp, o['poly'], "CHK-FILL-DEDUCT", 8, transp=0.2)
-        _outline(msp, o['poly'], "CHK-FILL-DEDUCT", 250, lw=30)
-        c = o['poly'].centroid
-        _text(msp, f"{i}", c.x, c.y, "CHK-FILL-TEXT", 1, h=180 if o['kind'] == 'column' else 300)
-    _outline(msp, M.D, "CHK-FILL-BOUNDARY", 1, lw=100)
-    for z in B['gross_rows'][1:]:
-        c = z['region'].centroid
-        _text(msp, f"وش {z['top']:+.2f} | ردم {z['h']:.2f}م | {z['A']:.1f}م²", c.x, c.y - 450, "CHK-FILL-TEXT", 7, h=200)
-    x0, y0, x1, y1 = M.D.bounds
-    _text(msp, f"المات ‑8.45 | ردم 1.10م", x0 + 9000, y0 + 2500, "CHK-FILL-TEXT", 7, h=300)
-    for p in M.pits:
-        _outline(msp, p['outer'], "CHK-PENDING", 6, lw=50, dashed=True)
-        c = p['outer'].centroid
-        _text(msp, "حفرة صرف - عمقها مش في اللوحة", c.x, c.y + 1100, "CHK-PENDING", 6, h=180)
-    _title(msp, M, "CHK-FILL-TEXT", [
-        f"مراجعة الردم الداخلي — منسوب الردم {M.FILL:+.2f} — صافي {B['net']:.2f} م³",
-        f"حدود الردم: الوش الداخلي للجدار {M.D_dims[0]:.3f} × {M.D_dims[1]:.3f} م (أحمر). الألوان = وش اللبشة. الرمادي المرقّم = المخصوم (نفس أرقام الإكسل)."])
-    return _save(doc, path)
-
-
-def backfill_png(M, B, path):
-    import matplotlib; matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Polygon as PP
-    fig, ax = plt.subplots(figsize=(22, 19))
-    for z in B['zones']:
-        for p in _polys(z['region']):
-            ax.add_patch(PP([(x / 1000, y / 1000) for x, y in p.exterior.coords], fc=TOP_HEX.get(round(z['top'], 2), '#ddd'),
-                            ec='#666', lw=0.4))
-    for i, o in enumerate(B['obs'], 1):
-        for p in _polys(o['poly']):
-            ax.add_patch(PP([(x / 1000, y / 1000) for x, y in p.exterior.coords], fc='#9e9e9e', ec='#212121', lw=0.6))
-            for r in p.interiors:
-                ax.add_patch(PP([(x / 1000, y / 1000) for x, y in r.coords], fc=TOP_HEX[-7.75], ec='#212121', lw=0.6))
-        c = o['poly'].centroid
-        ax.text(c.x / 1000, c.y / 1000, str(i), fontsize=6 if o['kind'] == 'column' else 9, ha='center', va='center',
-                color='#b71c1c', weight='bold')
-    for p in M.pits:
-        xs, ys = p['outer'].exterior.xy
-        ax.plot([v / 1000 for v in xs], [v / 1000 for v in ys], ls='--', color='#6a1b9a', lw=1.5)
-    xs, ys = M.D.exterior.xy
-    ax.plot([v / 1000 for v in xs], [v / 1000 for v in ys], color='#d50000', lw=3)
-    for z in B['gross_rows'][1:]:
-        c = z['region'].centroid
-        ax.text(c.x / 1000, c.y / 1000 - 0.6, f"{z['top']:+.2f}\nh={z['h']:.2f}", fontsize=8, ha='center', va='top')
-    from matplotlib.patches import Patch
-    hand = [Patch(fc=v, ec='#666', label=f"{k:+.2f} → h={M.FILL-k:.2f} m") for k, v in sorted(TOP_HEX.items())]
-    hand += [Patch(fc='#9e9e9e', ec='#212121', label=arabic("مخصوم (مرقّم زي الإكسل)"))]
-    ax.legend(handles=hand, loc='upper left', bbox_to_anchor=(1.0, 1.0), fontsize=11, title=arabic("وش اللبشة → ارتفاع الردم"))
-    ax.set_aspect('equal'); ax.autoscale_view(); ax.grid(True, ls=':', alpha=0.4)
-    ax.set_title(arabic(f"مراجعة الردم الداخلي — منسوب الردم {M.FILL:+.2f} — الصافي {B['net']:.2f} م³ (+هدر 5٪ = {B['net']*1.05:.2f})"),
-                 fontsize=16, weight='bold')
-    ax.set_xlabel(arabic("X م من المحور 01")); ax.set_ylabel(arabic("Y م من المحور A"))
-    fig.tight_layout(); os.makedirs(os.path.dirname(path), exist_ok=True)
-    fig.savefig(path, dpi=110, facecolor='white'); plt.close(fig)
-    return path
-
-
-# ═══════════════════════════════════════════════════════════════════ العزل
-def _segs(I):
-    """(النوع، الاسم، القطع، المساحة) لكل وش رأسي معزول."""
-    out = [('footing' if s['kind'] == 'footing' else 'beam', s['name'], s['segs'], s['A']) for s in I['sides']]
-    out += [(v['kind'], v['name'], v['segs'], v['A']) for v in I['vert']]
-    out += [('perim', p['name'], p['segs'], p['A']) for p in I['perim']]
-    return out
-
-
-def insulation_dxf(doc, M, I, path):
-    msp = doc.modelspace()
-    for n, c in (("CHK-INS-HORIZ", 3), ("CHK-INS-VERT", 1), ("CHK-INS-TEXT", 7), ("CHK-PENDING", 6)):
-        _layer(doc, n, c)
-    for h in I['horiz']:
-        _hatch(msp, h['region'], "CHK-INS-HORIZ", TOP_ACI.get(round(h['top'], 2), 8), transp=0.65)
-    for kind, name, segs, A in _segs(I):
-        for (x0, y0, x1, y1, nx, ny, hh) in segs:
-            off = 60
-            msp.add_lwpolyline([_A(x0 + nx * off, y0 + ny * off), _A(x1 + nx * off, y1 + ny * off)],
-                               dxfattribs={'layer': "CHK-INS-VERT", 'color': KIND_ACI[kind], 'lineweight': 70})
-    for v in I['vert']:
-        if v['A'] <= 0: continue
-        c = v['ref']['poly'].centroid if v['ref'] and 'poly' in v['ref'] else None
-        if c is None:
-            o = [o for o in M.obs if o['name'] == v['name']][0]; c = o['poly'].centroid
-        _text(msp, f"{v['A']:.2f}", c.x, c.y, "CHK-INS-TEXT", KIND_ACI[v['kind']], h=160)
-    for s in I['sides']:
-        if s['A'] <= 0: continue
-        ref = (M.footings if s['kind'] == 'footing' else M.beams)
-        it = [r for r in ref if r['name'] == s['name'] and abs(r['top'] - s['top']) < 1e-6]
-        c = [r for r in it if f"({r['poly'].centroid.x/1000:.2f}, {r['poly'].centroid.y/1000:.2f})" == s['loc']]
-        c = (c or it)[0]['poly'].centroid
-        _text(msp, f"جوانب {s['A']:.2f}م²", c.x, c.y - 350, "CHK-INS-TEXT", KIND_ACI[s['kind']], h=170)
-    for q in I.get('pits', []):
-        _hatch(msp, q['poly'], "CHK-INS-HORIZ", 6, transp=0.3)
-        _outline(msp, q['outer'] if q['outer'] is not None else q['poly'], "CHK-INS-VERT", 6, lw=50)
-        c = q['poly'].centroid
-        _text(msp, f"{q['name']}: قاع {q['A_bot']:.2f} + جوانب {q['A_side']:.2f}م²", c.x, c.y + 1100, "CHK-INS-TEXT", 6, h=170)
-    _title(msp, M, "CHK-INS-TEXT", [
-        f"مراجعة العزل بالدهان — لحد منسوب الردم {M.FILL:+.2f} — صافي {I['total']:.2f} م²",
-        "الملوّن = أسطح أفقية معزولة. الخطوط = أوش رأسية معزولة: أزرق جوانب قواعد، سماوي جوانب سملات، أحمر رقاب أعمدة، بنفسجي أكوار، أخضر الجدار المحيط، تركواز الخزان (برّه بس)، برتقالي بادئ الرمب."])
-    return _save(doc, path)
-
-
-def insulation_png(M, I, path):
-    import matplotlib; matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Polygon as PP, Patch
-    from matplotlib.lines import Line2D
-    fig, ax = plt.subplots(figsize=(22, 19))
-    for h in I['horiz']:
-        for p in _polys(h['region']):
-            ax.add_patch(PP([(x / 1000, y / 1000) for x, y in p.exterior.coords], fc=TOP_HEX.get(round(h['top'], 2), '#ddd'),
-                            ec='none', alpha=0.8))
-            for r in p.interiors:
-                ax.add_patch(PP([(x / 1000, y / 1000) for x, y in r.coords], fc='white', ec='none'))
-    for kind, name, segs, A in _segs(I):
-        for (x0, y0, x1, y1, nx, ny, hh) in segs:
-            ax.plot([x0 / 1000, x1 / 1000], [y0 / 1000, y1 / 1000], color=KIND_HEX[kind], lw=2.2, solid_capstyle='butt')
-    for o in M.obs:
-        if o['kind'] == 'tank':
-            xs, ys = o['poly'].exterior.xy
-            ax.fill([v / 1000 for v in xs], [v / 1000 for v in ys], fc='#e0e0e0', ec='none')
-            c = o['poly'].centroid
-            ax.text(c.x / 1000, c.y / 1000, arabic("الخزان — جوّه مش بيتعزل"), ha='center', fontsize=10)
-    for q in I.get('pits', []):
-        xs, ys = q['poly'].exterior.xy
-        ax.fill([v / 1000 for v in xs], [v / 1000 for v in ys], fc='#d81b60', ec='#6a1b9a', lw=1.5)
-        c = q['poly'].centroid
-        ax.text(c.x / 1000, c.y / 1000 + 1.0, arabic(f"حفرة: {q['A_bot']+q['A_side']:.2f}م²"), ha='center', fontsize=9, color='#6a1b9a')
-    t = I['totals']
-    lab = {'footing': f"جوانب القواعد {t['s_foot']:.1f}", 'beam': f"جوانب السملات {t['s_beam']:.1f}",
-           'column': f"رقاب الأعمدة {t['col']:.1f}", 'core': f"الأكوار {t['core']:.1f}", 'perim': f"الجدار المحيط {t['perim']:.1f}",
-           'tank': f"الخزان (برّه) {t['tank']:.1f}", 'starter': f"بادئ الرمب {t['starter']:.1f}"}
-    hand = [Line2D([0], [0], color=KIND_HEX[k], lw=4, label=arabic(v + " م²")) for k, v in lab.items()]
-    hand += [Patch(fc=v, label=f"{arabic('ظهر')} {k:+.2f}") for k, v in sorted(TOP_HEX.items())]
-    ax.legend(handles=hand, loc='upper left', bbox_to_anchor=(1.0, 1.0), fontsize=11)
-    ax.set_aspect('equal'); ax.autoscale_view(); ax.grid(True, ls=':', alpha=0.4)
-    ax.set_title(arabic(f"مراجعة العزل بالدهان — لحد منسوب الردم {M.FILL:+.2f} — الصافي {I['total']:.2f} م² (+هدر 5٪ = {I['total']*1.05:.2f})"),
-                 fontsize=16, weight='bold')
-    fig.tight_layout(); os.makedirs(os.path.dirname(path), exist_ok=True)
-    fig.savefig(path, dpi=110, facecolor='white'); plt.close(fig)
-    return path
 
 
 if __name__ == "__main__":
