@@ -13,6 +13,8 @@ import numpy as np
 import shapely
 from substructure_model import MAT_TOP, PROBE, DOOR_W, DOOR_SILL_ABOVE
 
+PIT_DEPTH = 0.50   # م — عمق أي حفرة عمقها مش مرسوم (افتراض المهندس 2026-11-23)
+
 
 def _loc(g):
     """موقع مختصر: مركز الشكل بالمتر من تقاطع المحورين 01/A."""
@@ -96,21 +98,30 @@ def backfill(M):
 
 
 # ═══════════════════════════════════════════════════════════════════ البند 2: العزل
-def insulation(M, pit_depth=None):
+def insulation(M, pit_depth=PIT_DEPTH):
     F = M.FILL
-    # 0) الحفر المرسومة (بلوك 'sump pit'): المساحة الداخلية بتتعزل (تعليمة المهندس 2026-11-23) — القاع الداخلي
-    #    بند لوحده (بيتشال من ظهر اللبشة تحته عشان مايتحسبش مرتين)، والجوانب الداخلية = المحيط الداخلي × العمق (لو اتدخل).
+    # 0) الحفر: 3 حفر مرسومة (بلوك 'sump pit') + حفرتا الأسانسير (داخل CORE1/CORE2). المساحة الداخلية بتتعزل:
+    #    القاع الداخلي بند لوحده (بيتشال من ظهر اللبشة تحته)، والجوانب الداخلية = المحيط الداخلي × العمق.
+    #    العمق مش مرسوم → PIT_DEPTH (افتراض المهندس 2026-11-23: 0.50م لأي حفرة عمقها مش واضح).
     pits = []
     for i, p in enumerate(M.pits, 1):
         inner = p['inner'].intersection(M.D).difference(M.O) if p['inner'] is not None else None
         if inner is None or inner.area < 1.0:
             continue
-        c = inner.centroid; z = float(M.z(np.array([c.x]), np.array([c.y]))[0])
-        x0, y0, x1, y1 = p['inner'].bounds; ox0, oy0, ox1, oy1 = p['outer'].bounds
-        Pin = inner.length / 1000.0
-        pits.append(dict(no=i, poly=inner, outer=p['outer'], top=z, w=(x1 - x0) / 1000, l=(y1 - y0) / 1000,
-                         W=(ox1 - ox0) / 1000, L=(oy1 - oy0) / 1000, A_bot=inner.area / 1e6, P=Pin,
-                         A_side=Pin * pit_depth if pit_depth else 0.0, loc=_loc(inner)))
+        pits.append(dict(kind='sump', name=f"حفرة {i} (sump pit)", poly=inner, outer=p['outer']))
+    for l in M.lifts:
+        pits.append(dict(kind='lift', name=f"حفرة أسانسير {l['ref']['label']}", poly=l['poly'], outer=None))
+    for q in pits:
+        g = q['poly']; c = g.centroid
+        q['top'] = float(M.z(np.array([c.x]), np.array([c.y]))[0])
+        x0, y0, x1, y1 = g.bounds; q['w'], q['l'] = (x1 - x0) / 1000, (y1 - y0) / 1000
+        if q['outer'] is not None:
+            ox0, oy0, ox1, oy1 = q['outer'].bounds; q['W'], q['L'] = (ox1 - ox0) / 1000, (oy1 - oy0) / 1000
+        else:
+            q['W'] = q['L'] = None
+        q['A_bot'] = g.area / 1e6; q['P'] = g.length / 1000.0
+        q['depth'] = pit_depth or 0.0; q['bottom'] = q['top'] - q['depth']
+        q['A_side'] = q['P'] * q['depth']; q['loc'] = _loc(g)
     pit_union = shapely.union_all([q['poly'] for q in pits]) if pits else None
     # 1) أفقي: ظهر كل منطقة − بصمات العناصر الرأسية والخزان (مفيش عزل تحت عنصر رأسي ولا جوه الخزان)
     horiz = []
@@ -201,7 +212,7 @@ def pending_items(M):
         h = max(0.0, F - z); ai = p['inner'].area / 1e6 if p['inner'] else 0.0; ao = p['outer'].area / 1e6
         rows.append(dict(item=f"حفرة صرف (sump pit) {i}", where=f"{_loc(p['outer'])} على وش {z:+.2f}",
                          known=f"خارجي {math.sqrt(ao):.2f}×{math.sqrt(ao):.2f}م، داخلي {math.sqrt(ai):.2f}×{math.sqrt(ai):.2f}م (حائط 150مم) — بلوك 'sump pit' في لوحة RAFT RFT",
-                         missing="العمق ومنسوب القاع، وهل الحفرة طالعة لحد الأرضية (مفيش قطاع لها في اللوحة). القاع الداخلي محسوب في العزل",
+                         missing=f"العمق مش مرسوم → مفترض {PIT_DEPTH:.2f}م (تعليمة المهندس)؛ القاع والجوانب الداخلية محسوبين في العزل",
                          fill=f"لو مفتوحة لحد الأرضية: ‑{ao*h:.2f} م³ ({ao:.2f}م² × {h:.2f}م)",
                          ins=f"+{4*math.sqrt(ai):.2f} م² لكل 1م عمق (جوانب داخلية)" +
                              (f"، و+{4*math.sqrt(ao)*h:.2f} م² وش خارجي في مدى الردم لو طالعة" if h > 0 else ""),
@@ -212,9 +223,9 @@ def pending_items(M):
         P = inner.length / 1000.0
         rows.append(dict(item=f"عمق حفرة الأسانسير — {c['label']}", where=f"{_loc(inner)} داخل الكور على وش {z:+.2f}",
                          known=f"داخل الكور {a:.2f} م² (من حدوده المرسومة) — مخصوم من الردم ({a*h:.2f} م³) وقاعه وجوانبه لحد {F:+.2f} معزولين",
-                         missing="عمق الحفرة ومنسوب قاعها مش مرسومين على لوحتي اللبشة",
+                         missing=f"عمق الحفرة مش مرسوم → مفترض {PIT_DEPTH:.2f}م تحت وش اللبشة (تعليمة المهندس)",
                          fill="مخصوم بالفعل (مش بيتردم)",
-                         ins=f"لو الحفرة أعمق من وش اللبشة: + {P:.2f} م² لكل 1م عمق زيادة (جوانب)", dV=0.0))
+                         ins=f"محسوب: قاع {a:.2f} م² + جوانب {P:.2f}×{PIT_DEPTH:.2f} = {P*PIT_DEPTH:.2f} م²", dV=0.0))
     rows.append(dict(item="هوابط سفلية في اللبشة", where="—",
                      known="قاع اللبشة ثابت ‑8.85 في القطاعات، والقواعد مُثخّنة لفوق (محسوبة كمناطق)",
                      missing="مفيش هوابط لتحت مرسومة في لوحتي RAFT CONCRETE DIMENSIONS / RAFT RFT",

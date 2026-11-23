@@ -187,9 +187,9 @@ def insulation_dxf(doc, M, I, path):
         _text(msp, f"جوانب {s['A']:.2f}م²", c.x, c.y - 350, "CHK-INS-TEXT", KIND_ACI[s['kind']], h=170)
     for q in I.get('pits', []):
         _hatch(msp, q['poly'], "CHK-INS-HORIZ", 6, transp=0.3)
-        _outline(msp, q['outer'], "CHK-INS-VERT", 6, lw=50)
+        _outline(msp, q['outer'] if q['outer'] is not None else q['poly'], "CHK-INS-VERT", 6, lw=50)
         c = q['poly'].centroid
-        _text(msp, f"حفرة {q['no']}: قاع {q['A_bot']:.2f}م²", c.x, c.y + 1100, "CHK-INS-TEXT", 6, h=170)
+        _text(msp, f"{q['name']}: قاع {q['A_bot']:.2f} + جوانب {q['A_side']:.2f}م²", c.x, c.y + 1100, "CHK-INS-TEXT", 6, h=170)
     _title(msp, M, "CHK-INS-TEXT", [
         f"مراجعة العزل بالدهان — لحد منسوب الردم {M.FILL:+.2f} — صافي {I['total']:.2f} م²",
         "الملوّن = أسطح أفقية معزولة. الخطوط = أوش رأسية معزولة: أزرق جوانب قواعد، سماوي جوانب سملات، أحمر رقاب أعمدة، بنفسجي أكوار، أخضر الجدار المحيط، تركواز الخزان (برّه بس)، برتقالي بادئ الرمب."])
@@ -221,7 +221,7 @@ def insulation_png(M, I, path):
         xs, ys = q['poly'].exterior.xy
         ax.fill([v / 1000 for v in xs], [v / 1000 for v in ys], fc='#d81b60', ec='#6a1b9a', lw=1.5)
         c = q['poly'].centroid
-        ax.text(c.x / 1000, c.y / 1000 + 1.0, arabic(f"حفرة {q['no']}: {q['A_bot']:.2f}م²"), ha='center', fontsize=9, color='#6a1b9a')
+        ax.text(c.x / 1000, c.y / 1000 + 1.0, arabic(f"حفرة: {q['A_bot']+q['A_side']:.2f}م²"), ha='center', fontsize=9, color='#6a1b9a')
     t = I['totals']
     lab = {'footing': f"جوانب القواعد {t['s_foot']:.1f}", 'beam': f"جوانب السملات {t['s_beam']:.1f}",
            'column': f"رقاب الأعمدة {t['col']:.1f}", 'core': f"الأكوار {t['core']:.1f}", 'perim': f"الجدار المحيط {t['perim']:.1f}",
