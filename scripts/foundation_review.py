@@ -34,7 +34,7 @@ T = {  # نصوص الصور
                perim="الوش الداخلي للجدار المحيط", tank="الخزان (برّه بس)", starter="بادئا الرامب", lift="حفر الأسانسير",
                sump="حفر الصرف", wedge="قاع بلاطة رامب 03"),
         f=dict(beam="السملات", column="رقاب الأعمدة", core="الأكوار", tank="الخزان", starter="بادئا الرامب",
-               lift="داخل كوري الأسانسير", wedge="بلاطة رامب 03"),
+               lift="داخل كوري الأسانسير", sump="حفر الصرف", wedge="بلاطة رامب 03"),
         tank="الخزان — جوّه مش بيتعزل ولا بيتردم", m2="م²", m3="م³", gross="القائم", net="الصافي",
         waste="بالهالك 5٪", horiz="الأفقي (ظهر المات والقواعد والسملات)", total="الإجمالي",
     ),
@@ -50,7 +50,7 @@ T = {  # نصوص الصور
                perim="Perimeter wall inner face", tank="Tank (outside only)", starter="Ramp starters", lift="Lift pits",
                sump="Sump pits", wedge="Ramp 03 slab soffit"),
         f=dict(beam="Tie beams", column="Column necks", core="Cores", tank="Tank", starter="Ramp starters",
-               lift="Inside lift cores", wedge="Ramp 03 slab"),
+               lift="Inside lift cores", sump="Sump pits", wedge="Ramp 03 slab"),
         tank="Tank — inside not insulated, not filled", m2="m²", m3="m³", gross="Gross", net="Net",
         waste="+5% waste", horiz="Horizontal tops (raft, footings, tie beams)", total="Total",
     ),
@@ -120,22 +120,22 @@ def backfill_png(M, B, E, lang, path):
     for z in B['zones']:
         _patch(ax, z['region'], TOP_HEX.get(round(z['top'], 2), '#ddd'), ec='#777', lw=0.4)
     for e in E:
-        if e['kind'] in ('column', 'core', 'tank', 'starter', 'lift', 'wedge'):
-            fc = '#ffd6e7' if e['kind'] == 'lift' else ('#e0c9b8' if e['kind'] == 'wedge' else '#9e9e9e')
+        if e['kind'] in ('column', 'core', 'tank', 'starter', 'lift', 'sump', 'wedge'):
+            fc = '#ffd6e7' if e['kind'] in ('lift', 'sump') else ('#e0c9b8' if e['kind'] == 'wedge' else '#9e9e9e')
             _patch(ax, e['poly'], fc, ec='#212121', lw=0.6, z=5, alpha=0.9 if e['kind'] != 'wedge' else 0.7)
     for e in E:
-        if e['kind'] in ('mat', 'footing', 'beam', 'column', 'core', 'tank', 'starter', 'lift', 'wedge'):
+        if e['kind'] in ('mat', 'footing', 'beam', 'column', 'core', 'tank', 'starter', 'lift', 'sump', 'wedge'):
             _num(ax, e, small=e['kind'] in ('column', 'beam'))
-        if e['kind'] == 'lift':
+        if e['kind'] in ('lift', 'sump'):
             x, y = e['anchor']; ax.text(x / 1000, y / 1000 - 0.9, L['nofill'], fontsize=8, ha='center', color='#ad1457', zorder=21)
     _frame(ax, M, L['fill_title'], L['fill_sub'].format(F=f"{M.FILL:+.2f}", net=_fmt(B['net']), waste=_fmt(B['net'] * 1.05)), L)
     hand = [Patch(fc=v, ec='#777', label=L['lvl'].format(t=f"{k:+.2f}", h=f"{M.FILL-k:.2f}")) for k, v in sorted(TOP_HEX.items())]
-    hand += [Patch(fc='#9e9e9e', ec='#212121', label=L['ded']), Patch(fc='#ffd6e7', ec='#212121', label=L['f']['lift'] + " — " + L['nofill']),
+    hand += [Patch(fc='#9e9e9e', ec='#212121', label=L['ded']), Patch(fc='#ffd6e7', ec='#212121', label=L['f']['lift'] + " + " + L['f']['sump'] + " — " + L['nofill']),
              Patch(fc='white', ec='#d50000', lw=2, label=L['bound'])]
     ax.legend(handles=hand, loc='upper left', bbox_to_anchor=(1.01, 1.0), fontsize=13, frameon=True)
     bk = B['by_kind']
     lines = [f"{L['gross']}  {_fmt(B['gross'])} {L['m3']}"]
-    lines += [f"−  {L['f'][k]}  {_fmt(bk[k])}" for k in ('beam', 'column', 'core', 'tank', 'starter', 'lift', 'wedge')]
+    lines += [f"−  {L['f'][k]}  {_fmt(bk[k])}" for k in ('beam', 'column', 'core', 'tank', 'starter', 'lift', 'sump', 'wedge')]
     lines += [f"{L['net']}  {_fmt(B['net'])} {L['m3']}", f"{L['waste']}  {_fmt(B['net']*1.05)} {L['m3']}", "", L['num']]
     _box(fig, lines, 0.50, lang)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -218,9 +218,9 @@ def review_dxf(doc, M, E, item, data, path):
         for z in data['zones']:
             _hatch(msp, z['region'], P + "-AREAS", TOP_ACI.get(round(z['top'], 2), 8))
         for e in E:
-            if e['kind'] in ('column', 'core', 'tank', 'starter', 'lift', 'wedge'):
-                _hatch(msp, e['poly'], P + "-ELEMENTS", 8 if e['kind'] != 'lift' else 6, transp=0.2)
-        show = ('mat', 'footing', 'beam', 'column', 'core', 'tank', 'starter', 'lift', 'wedge')
+            if e['kind'] in ('column', 'core', 'tank', 'starter', 'lift', 'sump', 'wedge'):
+                _hatch(msp, e['poly'], P + "-ELEMENTS", 8 if e['kind'] not in ('lift', 'sump') else 6, transp=0.2)
+        show = ('mat', 'footing', 'beam', 'column', 'core', 'tank', 'starter', 'lift', 'sump', 'wedge')
         head = f"INTERNAL BACKFILL - fill level {M.FILL:+.2f} - net {data['net']:.2f} m3 (+5% {data['net']*1.05:.2f})"
     else:
         for h in data['horiz']:

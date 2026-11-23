@@ -131,7 +131,7 @@ def backfill(M):
         beam_rows.append(dict(uid=b['uid'], top=b['top'], L=b['L'], w=b['w'] / 1000.0, A=A, h=hb, V=A * hb))
     # العناصر الرأسية + داخل كوري الأسانسير: Σ مساحة العنصر في كل منطقة وش × ارتفاع الردم فوقها
     obs_rows = []
-    for o in M.obs + M.lifts:
+    for o in M.obs + M.lifts + M.sumps:
         V = 0.0; Aw = 0.0; zs = []
         for uid, name, kind, reg, top in zones:
             a = o['poly'].intersection(reg).area / 1e6
@@ -147,7 +147,7 @@ def backfill(M):
     wedge_V = sum(v[0] for v in wedge.values())
     by_kind = collections.OrderedDict()
     by_kind['beam'] = sum(r['V'] for r in beam_rows)
-    for k in ('column', 'core', 'tank', 'starter', 'lift'):
+    for k in ('column', 'core', 'tank', 'starter', 'lift', 'sump'):
         by_kind[k] = sum(r['V'] for r in obs_rows if r['kind'] == k)
     by_kind['wedge'] = wedge_V
     deduct = sum(by_kind.values())
@@ -261,6 +261,7 @@ def notes(M):
         ("حدود الردم", f"الوش الداخلي للجدار المحيط: {M.D_dims[0]:.3f} × {M.D_dims[1]:.3f} م = {M.D.area/1e6:.2f} م² (3 أضلاع عالية + جدار الجار 1.70م). الجدار نفسه برّه الحدود."),
         ("الخزان", "جوّه مش بيتردم ومش بيتعزل (ومعاه العمودين اللي جوّاه). بيتعزل من برّه بس."),
         ("كوري الأسانسير (1 و 2)", "جوّاهم مش بيتردم. قاع وجوانب حفرة الأسانسير بيتعزلوا."),
+        ("حفر الصرف التلاتة", "فتحتها الداخلية 1.20×1.20 مش بتتردم (بتتخصم من الردم من وش اللبشة لحد منسوب الردم). قاعها وجوانبها الداخلية بيتعزلوا."),
         ("كوري السلالم (3 شمالي و 3 جنوبي)", f"جوّاهم بيتردم لحد {F:+.2f}، وبيتعزلوا من برّه ومن جوّه."),
         ("أبواب كوري السلالم", f"الباب 1.20×2.30 بيبدأ {F+DOOR_SILL_ABOVE:+.2f} (10سم فوق وش قاعدة الـ1.50) → فوق منسوب الردم، فمفيش خصم والحائط تحته مصمت."),
         ("عمق الحفر", f"عمق حفر الصرف التلاتة وحفرتي الأسانسير مش مرسوم → مفترض {PIT_DEPTH:.2f}م تحت وش اللبشة حواليها (تعليمة المهندس)."),

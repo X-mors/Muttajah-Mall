@@ -312,7 +312,15 @@ class Substructure:
             if inner.area > 1.0:
                 self.lifts.append(dict(kind='lift', name=f"داخل {c['label']} (أسانسير — مش بيتردم)", poly=inner, ref=c,
                                        uid='LIFT:' + c['label']))
-        self.O_fill = unary_union([self.O] + [l['poly'] for l in self.lifts])
+        # حفر الصرف التلاتة: فتحتها الداخلية (1.20×1.20) مش بتتردم (تعليمة المهندس 2026-11-23) — خصم من الردم بس.
+        self.sumps = []
+        for i, p in enumerate(self.pits, 1):
+            if p['inner'] is None:
+                continue
+            g = p['inner'].intersection(D).difference(self.O)
+            if g.area > 1.0:
+                self.sumps.append(dict(kind='sump', name=f"حفرة صرف {i} (مش بتتردم)", poly=g, ref=p, uid=f"PIT{i}"))
+        self.O_fill = unary_union([self.O] + [l['poly'] for l in self.lifts] + [q['poly'] for q in self.sumps])
 
         # z-field (للفحص النقطي)
         self._zpolys = [(f['poly'], f['top']) for f in self.footings] + [(b['poly'], b['top']) for b in self.beams]

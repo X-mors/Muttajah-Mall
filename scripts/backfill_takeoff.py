@@ -21,10 +21,10 @@ import foundation_review as FR
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "output")
 WASTE = 1.05
 KIND_AR = {'mat': 'منطقة لبشة', 'footing': 'قاعدة', 'beam': 'سمل', 'column': 'رقبة عمود', 'core': 'كور', 'tank': 'خزان',
-           'starter': 'بادئ رامب', 'lift': 'كور أسانسير من جوّه', 'wedge': 'بلاطة رامب'}
+           'starter': 'بادئ رامب', 'lift': 'كور أسانسير من جوّه', 'sump': 'حفرة صرف', 'wedge': 'بلاطة رامب'}
 DED_AR = [('beam', "السملات (الجزء الظاهر فوق المات)"), ('column', "رقاب الأعمدة"), ('core', "حوائط الأكوار"),
           ('tank', "الخزان (حوائطه + داخله)"), ('starter', "بادئا الرامب"),
-          ('lift', "داخل كوري الأسانسير (مش بيتردم)"), ('wedge', "بلاطة رامب 03 تحت منسوب الردم")]
+          ('lift', "داخل كوري الأسانسير (مش بيتردم)"), ('sump', "حفر الصرف التلاتة (مش بتتردم)"), ('wedge', "بلاطة رامب 03 تحت منسوب الردم")]
 
 
 def detail_rows(M, B, E):
@@ -67,6 +67,9 @@ def hand_checks(M, B, E):
     l = [x for x in M.lifts if 'CORE2' in x['ref']['label']][0]
     x0, y0, x1, y1 = l['poly'].bounds; w, h = (x1 - x0) / 1000, (y1 - y0) / 1000
     out.append((f"رقم {num[l['uid']]}: داخل كور 2 (أسانسير — مش بيتردم)", f"{w:.2f} × {h:.2f} × 0.40", w * h * 0.40, o[l['uid']]['V']))
+    q = [x for x in M.sumps if x['uid'] == 'PIT3'][0]
+    x0, y0, x1, y1 = q['poly'].bounds; w, h = (x1 - x0) / 1000, (y1 - y0) / 1000
+    out.append((f"رقم {num['PIT3']}: حفرة صرف 3 (على المات ‑8.45 — مش بتتردم)", f"{w:.2f} × {h:.2f} × 1.10", w * h * 1.10, o['PIT3']['V']))
     return out
 
 
