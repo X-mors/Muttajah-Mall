@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 لوحة الحصر الكاملة لجميع العناصر الرأسية — البدروم السفلي (لِفت 1):
-أعمدة (65، مرقّمة بارتفاع+حجم) + حوائط محيطة (W1 شمالي 1.70م + W4 ×3) + أكوار (CORE1/2/3)
+أعمدة (مرقّمة بارتفاع+حجم) + حوائط محيطة (W1 شمالي 1.70م + W4 ×3) + أكوار (CORE1/2/3)
 + خزان T1 + بادئ الرمب. مع لوحة ملخّص جانبية بالأحجام. تُخرَج PNG عالية الوضوح.
 """
 import sys, os
@@ -24,21 +24,25 @@ def build(msp):
     cores=[(m,x,y) for sn,m,x,y in cc.columns_list(plan) if m.startswith("CORE")]
     cx=[c["x"] for c in rows]; cy=[c["y"] for c in rows]
     x0,x1,y0,y1=min(cx),max(cx),min(cy),max(cy)
-    # أحجام العناصر (من نفس ثوابت الحصر)
-    T=0.30; cols_ex=sum(r["volume"] for r in rows)             # الأعمدة (بعد شيل C3 الخزان)
-    # الجدران من الأطوال المرسومة (مطابق لحصر البروجكت): W1 شمالي + W2/W3/W4 حتى السقف
+    # أحجام العناصر = **نفس حساب main_elements_concrete** (تُقرأ من output/vertical_totals.json، بلا أرقام ثابتة)
+    import json
+    tp=os.path.join(OUT,"vertical_totals.json")
+    if not os.path.exists(tp):
+        raise SystemExit("شغّل main_elements_concrete.py أولاً لتوليد vertical_totals.json")
+    tj=json.load(open(tp,encoding="utf-8"))
+    cols_ex=tj["columns"]; walls_ex=tj["walls"]; cores_ex=tj["cores"]; tank_ex=tj["tank"]; start_ex=tj["starter"]; total=tj["total"]
+    # تفصيل الجدران للعرض فقط (الإجمالي من الملف)
+    T=0.30
     seg=[("W1 شمالي 1.70م",48.835,-8.45,-6.75),("W2 غربي",45.0,-8.45,SOFFIT),("W3 جنوبي",53.335,-8.45,SOFFIT),
          ("W4 شرقي",14.1,-8.45,SOFFIT),("W4 شرقي",6.0,-8.15,SOFFIT),("W4 شرقي",4.85,-8.45,SOFFIT),
          ("W4 شرقي",6.0,-8.15,SOFFIT),("W4 شرقي",14.05,-8.45,SOFFIT)]
     wv={}
     for nm,L,b,t in seg: wv[nm]=wv.get(nm,0)+L*T*(t-b)
     walls=[(k,round(v,1)) for k,v in wv.items()]
-    walls_ex=sum(v for _,v in wv.items())
-    cores_ex=54.52; tank_ex=68.51; start_ex=2.02   # خزان بعد خصم كمرة الأسانسير؛ بادئ بعد خصم تداخل عمود رمب4
-    v_cols=round(cols_ex,1); v_walls=round(walls_ex,1); v_cores=round(cores_ex,1); v_tank=round(tank_ex,1); v_start=start_ex
-    total=round(cols_ex+walls_ex+cores_ex+tank_ex+start_ex,1)
+    v_cols=round(cols_ex,1); v_walls=round(walls_ex,1); v_cores=round(cores_ex,1); v_tank=round(tank_ex,1); v_start=round(start_ex,2)
     return rows,cores,(x0,x1,y0,y1),dict(cols=v_cols,walls=walls,v_walls=v_walls,
-            cores=v_cores,tank=v_tank,start=v_start,total=total)
+            cores=v_cores,tank=v_tank,start=v_start,total=round(total,2),
+            waste=round(tj["waste"],2), ncols=tj.get("n_cols",len(rows)))
 
 def draw(rows,cores,box,summ,path):
     import matplotlib; matplotlib.use("Agg")
@@ -78,7 +82,7 @@ def draw(rows,cores,box,summ,path):
     # لوحة الملخّص الجانبية
     axs=fig.add_axes([0.71,0.04,0.27,0.92]); axs.axis("off")
     lines=[("حصر العناصر الرأسية — م³","hdr"),("",""),
-           (f"الأعمدة (65 عمود)        {summ['cols']}","it"),
+           (f"الأعمدة ({summ['ncols']} عمود)        {summ['cols']}","it"),
            ("الحوائط المحيطة:","sub")]
     for nm,v in summ["walls"]: lines.append((f"   {nm}      {v}","sm"))
     lines+=[(f"   مجموع الحوائط       {summ['v_walls']}","it"),
@@ -86,7 +90,7 @@ def draw(rows,cores,box,summ,path):
             (f"الخزان T1 (ارتفاع 3.70م)  {summ['tank']}","it"),
             (f"بادئ الرمب (INV.B2 250×700) {summ['start']}","it"),
             ("",""),(f"الإجمالي                {summ['total']}","tot"),
-            (f"+ هدر 5٪               {round(summ['total']*1.05,1)}","tot"),("",""),
+            (f"+ هدر 5٪               {summ['waste']}","tot"),("",""),
             ("دليل الألوان:","sub"),
             ("■ أزرق: عمود يكمل للسقف","leg"),
             ("■ بنفسجي: عمود جدار C / W1","legp"),
@@ -115,7 +119,7 @@ def main():
     os.makedirs(OUT,exist_ok=True)
     p=os.path.join(OUT,"لوحة حصر العناصر الرأسية - البدروم السفلي.png")
     draw(rows,cores,box,summ,p); print("SAVED:",p)
-    print(f"الإجمالي {summ['total']} م³ (+هدر {round(summ['total']*1.05,1)})")
+    print(f"الإجمالي {summ['total']} م³ (+هدر {summ['waste']})")
 
 if __name__=="__main__":
     sys.stdout.reconfigure(encoding="utf-8",errors="replace"); main()

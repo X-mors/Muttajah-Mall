@@ -273,6 +273,11 @@ def main():
     print(f"الإجمالي الكلي (كل العناصر الرأسية) = {tot_all:.1f} م³ | +هدر 5٪ = {tot_all*WASTE:.1f} م³")
 
     os.makedirs(args.outdir,exist_ok=True)
+    # قيم العناصر غير المقرّبة → تقرأها لوحة الحصر (vertical_elements_drawing) فتطابق هذا الحصر بالظبط
+    import json as _json
+    _json.dump(dict(columns=grand, walls=v_walls, cores=v_cores, tank=v_tank, starter=v_starter,
+                    total=tot_all, waste=tot_all*WASTE, n_cols=len(rows)),
+               open(os.path.join(args.outdir,"vertical_totals.json"),"w",encoding="utf-8"), ensure_ascii=False)
     out=os.path.join(args.outdir,"حصر خرسانة العناصر الرأسية - لِفت 1.xlsx")
     wb.save(out); print("SAVED:",out)
 
