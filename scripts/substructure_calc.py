@@ -96,12 +96,28 @@ def backfill(M):
 
 
 # ═══════════════════════════════════════════════════════════════════ البند 2: العزل
-def insulation(M):
+def insulation(M, pit_depth=None):
     F = M.FILL
+    # 0) الحفر المرسومة (بلوك 'sump pit'): المساحة الداخلية بتتعزل (تعليمة المهندس 2026-11-23) — القاع الداخلي
+    #    بند لوحده (بيتشال من ظهر اللبشة تحته عشان مايتحسبش مرتين)، والجوانب الداخلية = المحيط الداخلي × العمق (لو اتدخل).
+    pits = []
+    for i, p in enumerate(M.pits, 1):
+        inner = p['inner'].intersection(M.D).difference(M.O) if p['inner'] is not None else None
+        if inner is None or inner.area < 1.0:
+            continue
+        c = inner.centroid; z = float(M.z(np.array([c.x]), np.array([c.y]))[0])
+        x0, y0, x1, y1 = p['inner'].bounds; ox0, oy0, ox1, oy1 = p['outer'].bounds
+        Pin = inner.length / 1000.0
+        pits.append(dict(no=i, poly=inner, outer=p['outer'], top=z, w=(x1 - x0) / 1000, l=(y1 - y0) / 1000,
+                         W=(ox1 - ox0) / 1000, L=(oy1 - oy0) / 1000, A_bot=inner.area / 1e6, P=Pin,
+                         A_side=Pin * pit_depth if pit_depth else 0.0, loc=_loc(inner)))
+    pit_union = shapely.union_all([q['poly'] for q in pits]) if pits else None
     # 1) أفقي: ظهر كل منطقة − بصمات العناصر الرأسية والخزان (مفيش عزل تحت عنصر رأسي ولا جوه الخزان)
     horiz = []
     for name, kind, reg, top in M.zone_regions():
         net = reg.difference(M.O)
+        if pit_union is not None:
+            net = net.difference(pit_union)
         horiz.append(dict(name=name, kind=kind, top=top, A=reg.area / 1e6, A_obs=reg.intersection(M.O).area / 1e6,
                           Anet=net.area / 1e6, loc=_loc(reg), region=net))
     # 2) جوانب القواعد والسملات: من وش المنطقة الأوطى جنبها لحد ظهرها (بيتحسب من العنصر الأعلى بس → مفيش تكرار)
@@ -169,9 +185,11 @@ def insulation(M):
     t['tank'] = sum(r['A'] for r in vert if r['kind'] == 'tank')
     t['starter'] = sum(r['A'] for r in vert if r['kind'] == 'starter')
     t['ramp_soffit'] = sum(v[1] for v in wedge.values())
+    t['pit_bottom'] = sum(q['A_bot'] for q in pits)
+    t['pit_sides'] = sum(q['A_side'] for q in pits)
     t['doors'] = -sum(d['A'] for d in doors)
     return dict(F=F, horiz=horiz, sides=sides, vert=vert, perim=perim, wedge=wedge, doors=doors, sill=sill,
-                totals=t, total=sum(t.values()))
+                pits=pits, pit_depth=pit_depth, totals=t, total=sum(t.values()))
 
 
 # ═══════════════════════════════════════════════════════════════════ البنود الناقصة
@@ -183,7 +201,7 @@ def pending_items(M):
         h = max(0.0, F - z); ai = p['inner'].area / 1e6 if p['inner'] else 0.0; ao = p['outer'].area / 1e6
         rows.append(dict(item=f"حفرة صرف (sump pit) {i}", where=f"{_loc(p['outer'])} على وش {z:+.2f}",
                          known=f"خارجي {math.sqrt(ao):.2f}×{math.sqrt(ao):.2f}م، داخلي {math.sqrt(ai):.2f}×{math.sqrt(ai):.2f}م (حائط 150مم) — بلوك 'sump pit' في لوحة RAFT RFT",
-                         missing="العمق ومنسوب القاع، وهل الحفرة طالعة لحد الأرضية (مفيش قطاع لها في اللوحة)",
+                         missing="العمق ومنسوب القاع، وهل الحفرة طالعة لحد الأرضية (مفيش قطاع لها في اللوحة). القاع الداخلي محسوب في العزل",
                          fill=f"لو مفتوحة لحد الأرضية: ‑{ao*h:.2f} م³ ({ao:.2f}م² × {h:.2f}م)",
                          ins=f"+{4*math.sqrt(ai):.2f} م² لكل 1م عمق (جوانب داخلية)" +
                              (f"، و+{4*math.sqrt(ao)*h:.2f} م² وش خارجي في مدى الردم لو طالعة" if h > 0 else ""),

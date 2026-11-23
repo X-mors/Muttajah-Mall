@@ -185,8 +185,11 @@ def insulation_dxf(doc, M, I, path):
         c = [r for r in it if f"({r['poly'].centroid.x/1000:.2f}, {r['poly'].centroid.y/1000:.2f})" == s['loc']]
         c = (c or it)[0]['poly'].centroid
         _text(msp, f"جوانب {s['A']:.2f}م²", c.x, c.y - 350, "CHK-INS-TEXT", KIND_ACI[s['kind']], h=170)
-    for p in M.pits:
-        _outline(msp, p['outer'], "CHK-PENDING", 6, lw=50, dashed=True)
+    for q in I.get('pits', []):
+        _hatch(msp, q['poly'], "CHK-INS-HORIZ", 6, transp=0.3)
+        _outline(msp, q['outer'], "CHK-INS-VERT", 6, lw=50)
+        c = q['poly'].centroid
+        _text(msp, f"حفرة {q['no']}: قاع {q['A_bot']:.2f}م²", c.x, c.y + 1100, "CHK-INS-TEXT", 6, h=170)
     _title(msp, M, "CHK-INS-TEXT", [
         f"مراجعة العزل بالدهان — لحد منسوب الردم {M.FILL:+.2f} — صافي {I['total']:.2f} م²",
         "الملوّن = أسطح أفقية معزولة. الخطوط = أوش رأسية معزولة: أزرق جوانب قواعد، سماوي جوانب سملات، أحمر رقاب أعمدة، بنفسجي أكوار، أخضر الجدار المحيط، تركواز الخزان (برّه بس)، برتقالي بادئ الرمب."])
@@ -214,9 +217,11 @@ def insulation_png(M, I, path):
             ax.fill([v / 1000 for v in xs], [v / 1000 for v in ys], fc='#e0e0e0', ec='none')
             c = o['poly'].centroid
             ax.text(c.x / 1000, c.y / 1000, arabic("الخزان — جوّه مش بيتعزل"), ha='center', fontsize=10)
-    for p in M.pits:
-        xs, ys = p['outer'].exterior.xy
-        ax.plot([v / 1000 for v in xs], [v / 1000 for v in ys], ls='--', color='#6a1b9a', lw=1.5)
+    for q in I.get('pits', []):
+        xs, ys = q['poly'].exterior.xy
+        ax.fill([v / 1000 for v in xs], [v / 1000 for v in ys], fc='#d81b60', ec='#6a1b9a', lw=1.5)
+        c = q['poly'].centroid
+        ax.text(c.x / 1000, c.y / 1000 + 1.0, arabic(f"حفرة {q['no']}: {q['A_bot']:.2f}م²"), ha='center', fontsize=9, color='#6a1b9a')
     t = I['totals']
     lab = {'footing': f"جوانب القواعد {t['s_foot']:.1f}", 'beam': f"جوانب السملات {t['s_beam']:.1f}",
            'column': f"رقاب الأعمدة {t['col']:.1f}", 'core': f"الأكوار {t['core']:.1f}", 'perim': f"الجدار المحيط {t['perim']:.1f}",

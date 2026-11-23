@@ -27,7 +27,9 @@ T_AR = [('h_mat', "أفقي: ظهر المات العام ‑8.45"), ('h_foot', 
         ('h_beam', "أفقي: ظهر السملات"), ('s_foot', "جوانب القواعد"), ('s_beam', "جوانب السملات"),
         ('col', "رقاب الأعمدة"), ('core', "الأكوار (كل الجوانب)"), ('perim', "الجدار المحيط (الوش الداخلي)"),
         ('tank', "الخزان (الوش الخارجي بس)"), ('starter', "بادئا الرمب (كل الأوجه المكشوفة)"),
-        ('ramp_soffit', "قاع بلاطة رمب 03 تحت منسوب الردم"), ('doors', "خصم أبواب أكوار السلالم تحت منسوب الردم")]
+        ('ramp_soffit', "قاع بلاطة رمب 03 تحت منسوب الردم"),
+        ('pit_bottom', "الحفر المرسومة ×3: القاع الداخلي"), ('pit_sides', "الحفر المرسومة ×3: الجوانب الداخلية (المحيط × العمق)"),
+        ('doors', "خصم أبواب أكوار السلالم تحت منسوب الردم")]
 
 
 def hand_checks(M, I):
@@ -59,7 +61,8 @@ def write_excel(M, I, pend, hc, path):
     s.head(["نوع السطح", "م²", "ورقة التفصيل"])
     sheet_of = {'h_mat': "الأفقي", 'h_foot': "الأفقي", 'h_beam': "الأفقي", 's_foot': "الجوانب", 's_beam': "الجوانب",
                 'col': "العناصر الرأسية", 'core': "العناصر الرأسية", 'perim': "الجدار المحيط", 'tank': "العناصر الرأسية",
-                'starter': "العناصر الرأسية", 'ramp_soffit': "العناصر الرأسية", 'doors': "العناصر الرأسية"}
+                'starter': "العناصر الرأسية", 'ramp_soffit': "العناصر الرأسية", 'doors': "العناصر الرأسية",
+                'pit_bottom': "الحفر", 'pit_sides': "الحفر"}
     for k, nm in T_AR:
         s.row([nm, t[k], sheet_of[k]])
     s.total("إجمالي العزل (صافي)", I['total'], col=2)
@@ -110,6 +113,20 @@ def write_excel(M, I, pend, hc, path):
     for d in I['doors']:
         s.row(["", "باب سلالم", d['core'], d['w'], d['sill'], d['h'], -d['A']])
     s.note(f"الباب يبدأ {I['sill']:+.2f} = 10سم فوق وش قاعدة الـ1500 ({M.FILL:+.2f}) → فوق منسوب الردم، فالخصم صفر والحائط تحته محسوب مصمت.", fill=X.YEL)
+    # ---- الحفر
+    s = X.Sheet(wb, "الحفر", [6, 30, 14, 14, 12, 14, 14, 18])
+    s.title("الحفر المرسومة في اللوحة (بلوك 'sump pit' — لوحة RAFT RFT): المساحة الداخلية معزولة")
+    dep = I['pit_depth']
+    s.note("المقاسات من الحدود المرسومة: خارجي 1.50×1.50، داخلي 1.20×1.20 (حائط 150مم). القاع الداخلي بند لوحده واتشال من ظهر اللبشة تحته. "
+           + (f"الجوانب الداخلية محسوبة بعمق {dep:.2f}م (مُدخَل)." if dep else
+              "العمق مش مرسوم في اللوحة → الجوانب الداخلية = 0 لحد ما العمق يتأكد (شغّل بـ --pit-depth <م>)."), fill=X.YEL)
+    s.head(["#", "الحفرة / الموقع (م من 01/A)", "الخارجي م", "الداخلي م", "الوش حواليها م", "القاع الداخلي م²", "المحيط الداخلي م", "الجوانب م²"])
+    for q in I['pits']:
+        s.row([q['no'], f"حفرة {q['no']} {q['loc']}", f"{q['W']:.2f}×{q['L']:.2f}", f"{q['w']:.2f}×{q['l']:.2f}",
+               q['top'], q['A_bot'], q['P'], q['A_side']])
+    s.total("القاع الداخلي", t['pit_bottom'], col=6, fill=X.GREY)
+    s.total("الجوانب الداخلية", t['pit_sides'], col=8, fill=X.GREY)
+    s.note(f"لكل 1م عمق: الجوانب الداخلية للتلات حفر = {sum(q['P'] for q in I['pits']):.2f} م².", fill=X.GREY)
     # ---- الجدار المحيط
     s = X.Sheet(wb, "الجدار المحيط", [36, 14, 16, 12])
     s.title("الوش الداخلي للجدار المحيط: الطول المكشوف × (منسوب الردم − الوش جنبه)")
@@ -137,11 +154,12 @@ def write_excel(M, I, pend, hc, path):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(); ap.add_argument("--no-review", action="store_true")
+    ap.add_argument("--pit-depth", type=float, default=None, help="عمق الحفر المرسومة (م) لحساب جوانبها الداخلية")
     a = ap.parse_args(argv)
     logging.disable(logging.WARNING)
     doc = ezdxf.readfile(cc.DEFAULT_DXF)
     M = SM.Substructure(doc.modelspace())
-    I = SC.insulation(M); pend = SC.pending_items(M); hc = hand_checks(M, I)
+    I = SC.insulation(M, a.pit_depth); pend = SC.pending_items(M); hc = hand_checks(M, I)
     print(f"البند 2: العزل بالدهان — لحد منسوب الردم {M.FILL:+.2f}")
     for k, nm in T_AR: print(f"  {nm}: {I['totals'][k]:.2f}")
     print(f"إجمالي العزل {I['total']:.2f} م² | +هدر 5٪ = {I['total']*WASTE:.2f}")
