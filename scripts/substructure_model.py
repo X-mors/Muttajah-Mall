@@ -31,6 +31,7 @@ MAT_TOP   = CX.RAFT_LOW_TOP             # ‑8.45 وش المات العام
 FILL_THK  = 1500                        # القاعدة اللي منسوبها = منسوب الردم
 DOOR_W, DOOR_H, DOOR_SILL_ABOVE = 1.20, 2.30, 0.10   # باب كور السلالم (تعليمة المهندس)
 RFT_ORIGIN = (-741110.0, 387399.0)      # لوحة RAFT RFT (نفس الشبكة، إزاحة 100000)
+LIFT_CORES = ('CORE1', 'CORE2')         # كوري الأسانسير — داخلهم مش بيتردم
 STEP = 20.0                             # مم — تقسيم الحواف عند حساب الأسطح الرأسية
 PROBE = 5.0                             # مم — نقطة الفحص على جانبَي الحافة
 
@@ -296,6 +297,19 @@ class Substructure:
             add('starter', s['name'], s['poly'], s)
         self.obs = obs
         self.O = unary_union([o['poly'] for o in obs]) if obs else Polygon()
+        # داخل كوري الأسانسير (CORE1 جنب الخزان + CORE2): مش بيتردم (تعليمة المهندس 2026-11-23) — بيتخصم من الردم بس؛
+        # قاعه وجوانبه الداخلية لحد منسوب الردم بيتعزلوا (قاع/جوانب حفرة الأسانسير كما هي مرسومة).
+        self.lifts = []
+        for c in self.cores:
+            if c['name'] not in LIFT_CORES:
+                continue
+            inner = c['poly'].envelope.difference(c['poly'])
+            if c['name'] == 'CORE1':
+                inner = inner.difference(self.tank_out)
+            inner = _snap(inner).intersection(D).difference(self.O)
+            if inner.area > 1.0:
+                self.lifts.append(dict(kind='lift', name=f"داخل {c['label']} (أسانسير — مش بيتردم)", poly=inner, ref=c))
+        self.O_fill = unary_union([self.O] + [l['poly'] for l in self.lifts])
 
         # z-field (للفحص النقطي)
         self._zpolys = [(f['poly'], f['top']) for f in self.footings] + [(b['poly'], b['top']) for b in self.beams]

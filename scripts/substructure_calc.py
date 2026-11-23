@@ -48,7 +48,7 @@ def backfill(M):
     zone_rows = []
     for name, kind, reg, top in zones:
         h = max(0.0, F - top); A = reg.area / 1e6
-        Ao = reg.intersection(M.O).area / 1e6
+        Ao = reg.intersection(M.O_fill).area / 1e6
         zone_rows.append(dict(name=name, kind=kind, top=top, A=A, Aobs=Ao, Anet=A - Ao, h=h,
                               Vg=A * h, Vnet=(A - Ao) * h, loc=_loc(reg), region=reg))
     # الحجم القائم: المات (شامل شرائح السملات) + كل قاعدة بوشّها
@@ -68,7 +68,7 @@ def backfill(M):
                               loc=_loc(b['region'])))
     # العناصر الرأسية: Σ مساحة العنصر في كل منطقة وش × ارتفاع الردم فوقها
     obs_rows = []
-    for o in M.obs:
+    for o in M.obs + M.lifts:
         V = 0.0; Aw = 0.0; zs = []
         for name, kind, reg, top in zones:
             a = o['poly'].intersection(reg).area / 1e6
@@ -85,7 +85,7 @@ def backfill(M):
     wedge_V = sum(v[0] for v in wedge.values())
     by_kind = collections.OrderedDict()
     by_kind['tie_beams'] = sum(r['V'] for r in beam_rows)
-    for k in ('column', 'core', 'tank', 'starter'):
+    for k in ('column', 'core', 'tank', 'starter', 'lift'):
         by_kind[k] = sum(r['V'] for r in obs_rows if r['kind'] == k)
     by_kind['ramp_slab'] = wedge_V
     deduct = sum(by_kind.values())
@@ -188,19 +188,15 @@ def pending_items(M):
                          ins=f"+{4*math.sqrt(ai):.2f} م² لكل 1م عمق (جوانب داخلية)" +
                              (f"، و+{4*math.sqrt(ao)*h:.2f} م² وش خارجي في مدى الردم لو طالعة" if h > 0 else ""),
                          dV=ao * h))
-    for c in M.cores:
-        if c['name'] not in ('CORE1', 'CORE2'):
-            continue
-        inner = c['poly'].envelope.difference(c['poly'])
-        if c['name'] == 'CORE1':
-            inner = inner.difference(M.tank_out)
-        a = inner.area / 1e6; cc_ = inner.centroid
+    for l in M.lifts:
+        inner = l['poly']; a = inner.area / 1e6; cc_ = inner.centroid; c = l['ref']
         z = float(M.z(np.array([cc_.x]), np.array([cc_.y]))[0]); h = max(0.0, F - z)
-        rows.append(dict(item=f"حفرة أسانسير تحت {c['label']}", where=f"{_loc(inner)} داخل الكور على وش {z:+.2f}",
-                         known=f"مساحة داخل الكور {a:.2f} م² (من حدوده المرسومة)",
-                         missing="مفيش حفرة أسانسير مرسومة على لوحتي اللبشة (لا حدود ولا منسوب)",
-                         fill=f"لو فيه حفرة: ‑{a*h:.2f} م³ (داخل الكور مش هيتردم)",
-                         ins="+ جوانب الحفرة حسب عمقها (قاعها بيحلّ محل ظهر اللبشة المحسوب)", dV=a * h))
+        P = inner.length / 1000.0
+        rows.append(dict(item=f"عمق حفرة الأسانسير — {c['label']}", where=f"{_loc(inner)} داخل الكور على وش {z:+.2f}",
+                         known=f"داخل الكور {a:.2f} م² (من حدوده المرسومة) — مخصوم من الردم ({a*h:.2f} م³) وقاعه وجوانبه لحد {F:+.2f} معزولين",
+                         missing="عمق الحفرة ومنسوب قاعها مش مرسومين على لوحتي اللبشة",
+                         fill="مخصوم بالفعل (مش بيتردم)",
+                         ins=f"لو الحفرة أعمق من وش اللبشة: + {P:.2f} م² لكل 1م عمق زيادة (جوانب)", dV=0.0))
     rows.append(dict(item="هوابط سفلية في اللبشة", where="—",
                      known="قاع اللبشة ثابت ‑8.85 في القطاعات، والقواعد مُثخّنة لفوق (محسوبة كمناطق)",
                      missing="مفيش هوابط لتحت مرسومة في لوحتي RAFT CONCRETE DIMENSIONS / RAFT RFT",
