@@ -24,6 +24,19 @@ import backfill_takeoff as BF
 OUT=os.path.join(os.path.dirname(__file__), "..", "output")
 FILL=-7.35; MAT_TOP=-8.45; WALL_THK=0.30; CORE_THK=0.30; TANK_THK=0.35; WASTE=1.05
 
+def footing_sides(msp):
+    """جوانب القواعد المُثخّنة = محيط كل قاعدة × ارتفاع خطوتها فوق المات ‑8.45 (كلها في مدى الردم)."""
+    import math
+    RX,RY=CX.PLAN_ORIGIN['RAFT']
+    fts=RF.assign_thickness(RF.collect_footings(msp), RF.collect_thickness_bubbles(msp))
+    tot=0.0
+    for f in fts:
+        pts=[(x-RX,y-RY) for x,y in f['pts']]; P=0.0
+        for i in range(len(pts)):
+            x1,y1=pts[i]; x2,y2=pts[(i+1)%len(pts)]; P+=math.hypot(x2-x1,y2-y1)/1000.0
+        tot+=P*(f['top']-MAT_TOP)
+    return round(tot,2)
+
 def columns_surf(msp):
     """بصمة الأعمدة (تُخصَم من الأفقي) + رقاب الأعمدة الرأسية (محيط × ارتفاع)."""
     L=CX.LiftOne(msp); plan,sched=ct.collect(msp); stages,_=cc.parse_schedule_stages(sched)
@@ -53,7 +66,9 @@ def main():
     cores_v=round((2*(6.36/CORE_THK)*(FILL-(-7.75)))*2 + 2*(2.55/CORE_THK)*(FILL-(-7.75)),2)  # الأكوار الوجهان
     tank_outer=round(40.4*(FILL-(-7.75)),2)                                    # محيط خارجي ≈40.4م (L 10.51×9.70) × الارتفاع
     starter_v=round(2*(3.9+4.2)*(FILL-MAT_TOP),2)                              # بادئ الرمب وجهاه
+    fside=footing_sides(msp)
     surfaces=[("أفقي: ظهر اللبشة والقواعد (− بصمات العناصر)", horiz),
+              ("جوانب القواعد المُثخّنة (خطوتها فوق المات)", fside),
               ("رأسي: رقاب الأعمدة", col_vert),
               ("رأسي: الأكوار (الوجهان)", cores_v),
               ("رأسي: الجدار المحيط (الوش الداخلي)", perim_wall),
@@ -64,7 +79,8 @@ def main():
     print(f"اللبشة الكلية {raft:.1f} م² − بصمات (أعمدة {col_foot} + حوائط {round(wall_foot,1)} + أكوار {round(core_foot,1)} + خزان {round(tank_foot,1)} + بادئ {round(start_foot,2)})")
     for nm,v in surfaces: print(f"  {nm}: {v} م²")
     print(f"\nإجمالي العزل = {total} م² | +هدر 5٪ = {round(total*WASTE,2)} م²")
-    print("⚠️ لم تُضَف بعد: جوانب القواعد/السملات/الهوابط/حفر الأسانسير، وفتحات الأبواب.")
+    print("ملاحظات: أبواب الأكوار تبدأ ‑7.25 (10سم فوق قاعدة 1.50 وشّها ‑7.35) = فوق منسوب الردم → لا خصم من عزل مدى الردم.")
+    print("غير موجود في اللوحة (لم يُفترَض): السملات (tie beams)، حفر الأسانسير، الهوابط السفلية — لا مسقط/منسوب لها في الـDXF.")
     # Excel
     try:
         from openpyxl import Workbook
@@ -84,7 +100,7 @@ def main():
         for nm,v in surfaces: st(ws.cell(r,1,nm),ha="right",fill=LT); ws.merge_cells(f"A{r}:A{r}"); st(ws.cell(r,2,v)); r+=1
         st(ws.cell(r,1,"إجمالي العزل (صافي)"),b=True,fill=GRN); st(ws.cell(r,2,total),b=True,fill=GRN); r+=1
         st(ws.cell(r,1,"+ هدر 5٪"),b=True,fill=GREY); st(ws.cell(r,2,round(total*WASTE,2)),b=True,fill=GREY); r+=2
-        st(ws.cell(r,1,"⚠️ قيد الإكمال: جوانب القواعد/السملات/الهوابط/حفر الأسانسير، وفتحات الأبواب."),ha="right",fill=YEL); ws.merge_cells(f"A{r}:C{r}")
+        st(ws.cell(r,1,"الأبواب تبدأ ‑7.25 (فوق الردم) → لا خصم. غير موجود باللوحة (لم يُفترَض): السملات، حفر الأسانسير، الهوابط السفلية."),ha="right",fill=YEL,wrap=True); ws.merge_cells(f"A{r}:C{r}"); ws.row_dimensions[r].height=30
         for j,w in enumerate([44,14,4],1): ws.column_dimensions[get_column_letter(j)].width=w
         os.makedirs(OUT,exist_ok=True); p=os.path.join(OUT,"حصر العزل بالدهان - البدروم السفلي.xlsx")
         wb.save(p); print("SAVED:",p)
