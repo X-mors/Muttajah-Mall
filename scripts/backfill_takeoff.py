@@ -97,6 +97,7 @@ def main():
     print(f"\nيُخصَم خرسانة في مدى الردم: رقاب أعمدة {nc} ({ncn} عمود) + حوائط {nw} + (أكوار/خزان/بادئ) {no} = {deduct} م³")
     print(f"\nالردم المدموك (صافي) = {net} م³")
     print(f"الردم المطلوب توريده (× معامل انضغاط {COMPACTION}) = {supply} م³ | +هدر 5٪ = {round(supply*WASTE,2)} م³")
+    print("غير موجود في اللوحة (لم يُفترَض، لا خصم): السملات (tie beams)، حفر الأسانسير، الهوابط السفلية — لا مسقط/منسوب لها في الـDXF.")
     # Excel
     try:
         from openpyxl import Workbook
@@ -126,7 +127,7 @@ def main():
         st(ws.cell(r,1,"الردم المدموك (صافي)"),b=True,fill=GRN); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,net),b=True,fill=GRN); r+=1
         st(ws.cell(r,1,f"الردم المطلوب توريده (×{COMPACTION})"),b=True,fill=GRN); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,supply),b=True,fill=GRN); r+=1
         st(ws.cell(r,1,"+ هدر 5٪ على التوريد"),b=True,fill=GREY); ws.merge_cells(f"A{r}:C{r}"); st(ws.cell(r,4,round(supply*WASTE,2)),b=True,fill=GREY); r+=2
-        st(ws.cell(r,1,"⚠️ قيد الإكمال (تُخصَم لاحقاً): السملات، حفر الأسانسير، الهوابط السفلية، سمك العزل."),ha="right",fill=YEL); ws.merge_cells(f"A{r}:D{r}")
+        st(ws.cell(r,1,"غير موجود في اللوحة (لم يُفترَض، لا خصم): السملات (tie beams)، حفر الأسانسير، الهوابط السفلية."),ha="right",fill=YEL); ws.merge_cells(f"A{r}:D{r}")
         for j,w in enumerate([30,14,14,12],1): ws.column_dimensions[get_column_letter(j)].width=w
         os.makedirs(OUT,exist_ok=True); p=os.path.join(OUT,"حصر الردم الداخلي - البدروم السفلي.xlsx")
         wb.save(p); print("SAVED:",p)
